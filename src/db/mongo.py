@@ -1,4 +1,3 @@
-from enum import Enum
 from typing import Dict, Any, List
 from datetime import datetime, date
 from contextlib import closing
@@ -16,7 +15,7 @@ from utils.utils import SETTINGS, Interval
 from utils.commodity import Commodity
 
 
-class MongoDB:
+class Mongo:
     def __init__(self) -> None:
         self.db_name: str = SETTINGS['dbs']['db_name']
         self.host: str = SETTINGS['dbs']['host']
