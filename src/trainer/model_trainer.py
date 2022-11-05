@@ -29,7 +29,7 @@ class ModelTrainer:
         self.symbol = get_symbols_by_names(["cotton"])[0]
         self.max_sample_size = int(max_sample_size)
     
-    def get_training_data(self, start_dt=date(2016, 1, 1), end_dt=date(2022, 1, 1)):
+    def get_training_data(self, start_dt=date(2018, 1, 1), end_dt=date(2022, 1, 1)):
         dataloader = DataLoader(start_dt=start_dt, end_dt=end_dt)
         offline_data: pd.DataFrame = dataloader.get_offline_data(
                 interval=self.interval, instrument_id=self.symbol, offset=self.max_sample_size, fixed_dt=True)
