@@ -1,4 +1,10 @@
 # Transformer Time series classification 
+import logging 
+import os 
+logging.getLogger('tensorflow').disabled = True
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+
+
 import pandas as pd
 import tensorflow as tf
 from tensorflow import keras
@@ -14,14 +20,14 @@ from wandb.keras import WandbCallback
 
 class TTCModel:
     def __init__(self, data: pd.DataFrame):
-        print('GPU name: ', tf.config.experimental.list_physical_devices('GPU'))
+        print('GPU name: ', tf.config.list_physical_devices('GPU'))
         self.n_classes = 5
 
         if isinstance(data, pd.DataFrame):
             X, y = self.pre_process_saving(data)
         else:
             X, y = data
-        # X = self.timeseries_normalize(X)
+        X = self.timeseries_normalize(X)
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.33, random_state=42, shuffle=False)
         self.input_shape = self.X_train.shape[1:]
     
@@ -30,7 +36,7 @@ class TTCModel:
             # subset shpae: (max_encode_length, 8)
             scaler = MinMaxScaler(feature_range=(0, 2))
             data[subset] = scaler.fit_transform(data[subset])
-            print(data[subset])
+            # print(data[subset])
         return data
     
     def pre_process_saving(self, data: pd.DataFrame, max_encode_length: int = 60, max_label_length: int = 30):
@@ -156,14 +162,14 @@ class TTCModel:
 
         callbacks = [
             keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True), 
-            WandbCallback(save_model=True)
+            WandbCallback(save_model=True, monitor="sparse_categorical_accuracy", mode="max")
         ]
 
         model.fit(
             self.X_train,
             self.y_train,
             validation_split=0.2,
-            epochs=200,
+            epochs=20,
             batch_size=256,
             shuffle=True,
             callbacks=callbacks,
