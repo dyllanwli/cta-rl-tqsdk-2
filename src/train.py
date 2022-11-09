@@ -1,4 +1,7 @@
-
+import logging 
+import os 
+logging.getLogger('tensorflow').disabled = True
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 from trainer.model_trainer import ModelTrainer
 
 def main():

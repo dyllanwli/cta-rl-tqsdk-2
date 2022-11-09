@@ -13,12 +13,16 @@ from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor
 from pytorch_lightning.loggers import TensorBoardLogger
 import torch
 
+from pytorch_forecasting.data.encoders import NaNLabelEncoder
 from pytorch_forecasting import Baseline, TemporalFusionTransformer, TimeSeriesDataSet
 # from pytorch_forecasting.data import GroupNormalizer
 from pytorch_forecasting.metrics import SMAPE, PoissonLoss, QuantileLoss
 from pytorch_forecasting.models.temporal_fusion_transformer.tuning import optimize_hyperparameters as tft_tune
 
 from pytorch_forecasting.data.examples import get_stallion_data
+
+from tqdm import tqdm
+from collections import defaultdict
 
 # fix bug pytorch/30966
 import tensorflow as tf
@@ -30,12 +34,15 @@ class TFTModel:
         data: pd.DataFrame,
         batch_size: int = 128,
         tune_result_name: str = "tft_tuned"):
+        
+        self.max_prediction_length = 2
+        self.max_encoder_length = 60
 
         self.tuned_result_name = tune_result_name
         data = self._pre_process(data)
         self.training, self.validation = self._build_dataloader(data)
         self.train_dataloader = self.training.to_dataloader(train=True, batch_size=batch_size, num_workers=4)
-        self.val_dataloader = self.validation.to_dataloader(train=False, batch_size=batch_size * 10, num_workers=0)
+        self.val_dataloader = self.validation.to_dataloader(train=False, batch_size=batch_size, num_workers=0)
         # configure network and trainer
         pl.seed_everything(42)
 
@@ -50,8 +57,8 @@ class TFTModel:
         return data._to_pandas()
 
     def _build_dataloader(self, data: pd.DataFrame):
-        max_prediction_length = 2
-        max_encoder_length = 60
+        max_prediction_length = self.max_prediction_length
+        max_encoder_length = self.max_encoder_length
         training_cutoff = data["time_idx"].iloc[-1] - max_prediction_length
         # variable_groups = {"time_variable": ["is_daytime"],}
 
@@ -59,13 +66,13 @@ class TFTModel:
             data[lambda x: x["time_idx"] <= training_cutoff],
             time_idx="time_idx",
             target="close",
-            group_ids=["instrument_id"],
+            group_ids=["underlying_symbol"],
             weight=None,
             min_encoder_length=max_encoder_length // 2,  # keep encoder length long (as it is in the validation set)
             max_encoder_length=max_encoder_length,
             min_prediction_length=1,
             max_prediction_length=max_prediction_length,
-            static_categoricals=["instrument_id"],
+            static_categoricals=["underlying_symbol"],
             static_reals=["duration"],
             time_varying_known_categoricals=["is_daytime"],
             # variable_groups=variable_groups, 
@@ -85,6 +92,7 @@ class TFTModel:
             add_target_scales=True,
             add_encoder_length=True,
             allow_missing_timesteps=True,
+            categorical_encoders={"underlying_symbol": NaNLabelEncoder(add_nan=True)},
         )
 
         # create validation set (predict=True) which means to predict the last max_prediction_length points in time
@@ -104,7 +112,7 @@ class TFTModel:
             devices=-1, 
             enable_model_summary=True,
             gradient_clip_val=0.1,
-            limit_train_batches=100,  # comment in for training, running valiation every 30 batches
+            # limit_train_batches=100,  # comment in for training, running valiation every 30 batches
             # fast_dev_run=True,  # comment in to check that networkor dataset has no serious bugs
             callbacks=[lr_logger, early_stop_callback],
             logger=logger,
@@ -112,11 +120,12 @@ class TFTModel:
 
         tft = TemporalFusionTransformer.from_dataset(
             self.training,
-            learning_rate=0.03,
-            hidden_size=16,
-            attention_head_size=1,
+            learning_rate=0.01,
+            hidden_size=32,
+            attention_head_size=4,
             dropout=0.1,
-            hidden_continuous_size=8,
+            hidden_continuous_size=16,
+
             output_size=7,  # 7 quantiles by default
             loss=QuantileLoss(),
             log_interval=10,  # uncomment for learning rate finder and otherwise, e.g. to 10 for logging every 10 batches
@@ -161,77 +170,97 @@ class TFTModel:
 
         # show best hyperparameters
         print(study.best_trial.params)
+    
+    def predict(self, trainer, data):
+        """
 
-    def test_predict(self, trainer = None, checkpoint_path = None):
+        new_data = self.get_training_data(start_dt=date(2022, 7, 1), end_dt=date(2022, 8, 1))
+        model.predict(trainer="/h/diya.li/quant/cta-rl-tqsdk-2/src/lightning_logs/lightning_logs/version_2/checkpoints/epoch=13-step=37058.ckpt", data = new_data)
+        """
+        if isinstance(trainer, str):
+            model: TemporalFusionTransformer = TemporalFusionTransformer.load_from_checkpoint(trainer)
+        else:
+            model: TemporalFusionTransformer = TemporalFusionTransformer.load_from_checkpoint(trainer.checkpoint_callback.best_model_path)
+        data = self._pre_process(data)
+        actions = 0
+        actuals = 0
+        predicted_true = 0
+
+        for i in tqdm(range(data.shape[0] - self.max_encoder_length - self.max_prediction_length - 1)): 
+            subset = data.iloc[i:i+self.max_encoder_length]
+
+            next_price = data.iloc[i+self.max_encoder_length+self.max_prediction_length]["close"]
+            price = subset.iloc[-1]["close"]
+            try:    
+                _, validation = self._build_dataloader(subset)
+                val_dataloader = validation.to_dataloader(train=False, batch_size=1, num_workers=0)
+
+                predictions = model.predict(val_dataloader)
+                threshold = 0.01
+
+                if next_price > price:
+                    actual_action = 2
+                elif next_price == price:
+                    actual_action = 1
+                else:
+                    actual_action = 0
+
+                if price - predictions[0][1] > threshold:
+                    # long
+                    action = 2
+                elif price - predictions[0][1] < - threshold:
+                    # short
+                    action = 0
+                else:
+                    # hold
+                    action = 1
+                if action == actual_action or action == 1:
+                    predicted_true += 1
+                actions += action
+                actuals += actual_action
+            except KeyError as e:
+                continue
+        print(actions, actuals, "win_rate:", predicted_true/actions)
+
+    def test_predict(self, trainer = None):
         # load the best model according to the validation loss
         # (given that we use early stopping, this is not necessarily the last epoch)
-        if checkpoint_path is None:
-            best_model_path = trainer.checkpoint_callback.best_model_path
+        if isinstance(trainer, str):
+            model: TemporalFusionTransformer = TemporalFusionTransformer.load_from_checkpoint(trainer)
         else:
-            best_model_path = checkpoint_path
-        best_tft: TemporalFusionTransformer = TemporalFusionTransformer.load_from_checkpoint(best_model_path)
+            model: TemporalFusionTransformer = TemporalFusionTransformer.load_from_checkpoint(trainer.checkpoint_callback.best_model_path)
         # calcualte mean absolute error on validation set
         actuals = torch.cat([y[0] for x, y in iter(self.val_dataloader)])
-        predictions = best_tft.predict(self.val_dataloader)
+        predictions = model.predict(self.val_dataloader)
         mean_error = (actuals - predictions).abs().mean()
         print("mean_error", mean_error)
         print("Plotting predictions")
         # raw predictions are a dictionary from which all kind of information including quantiles can be extracted
-        raw_predictions, x = best_tft.predict(self.val_dataloader, mode="raw", return_x=True, show_progress_bar=True)
+        raw_predictions, x = model.predict(self.val_dataloader, mode="raw", return_x=True, show_progress_bar=True)
 
         for idx in range(len(actuals[:10])):  
-            fig: plt.Figure = best_tft.plot_prediction(x, raw_predictions, idx=idx, add_loss_to_title=True)
+            fig: plt.Figure = model.plot_prediction(x, raw_predictions, idx=idx, add_loss_to_title=True)
             fig.set_size_inches(15,15)
             plt.savefig("figures/prediction_{}.png".format(idx))
             plt.close(fig)
         
         print("Plotting worst predictions")
         # calcualte metric by which to display
-        predictions = best_tft.predict(self.val_dataloader)
+        predictions = model.predict(self.val_dataloader)
         mean_losses = SMAPE(reduction="none")(predictions, actuals).mean(1)
         indices = mean_losses.argsort(descending=True)  # sort losses
         for idx in range(len(actuals[:10])): 
-            best_tft.plot_prediction(
-                x, raw_predictions, idx=indices[idx], add_loss_to_title=SMAPE(quantiles=best_tft.loss.quantiles)
+            model.plot_prediction(
+                x, raw_predictions, idx=indices[idx], add_loss_to_title=SMAPE(quantiles=model.loss.quantiles)
             )
             plt.savefig("figures/bad_prediction_{}.png".format(idx))
             plt.close(fig)
         # plot worst 10 examples
-        predictions, x = best_tft.predict(self.val_dataloader, return_x=True)
-        predictions_vs_actuals = best_tft.calculate_prediction_actual_by_variable(x, predictions)
-        fig = best_tft.plot_prediction_actual_by_variable(predictions_vs_actuals)
+        predictions, x = model.predict(self.val_dataloader, return_x=True)
+        predictions_vs_actuals = model.calculate_prediction_actual_by_variable(x, predictions)
+        fig = model.plot_prediction_actual_by_variable(predictions_vs_actuals)
         plt.savefig("figures/variable_prediction_{}.png".format(idx))
         plt.close()
-    
-
-        # # select last 24 months from data (max_encoder_length is 24)
-        # encoder_data = data[lambda x: x.time_idx > x.time_idx.max() - max_encoder_length]
-
-        # # select last known data point and create decoder data from it by repeating it and incrementing the month
-        # # in a real world dataset, we should not just forward fill the covariates but specify them to account
-        # # for changes in special days and prices (which you absolutely should do but we are too lazy here)
-        # last_data = data[lambda x: x.time_idx == x.time_idx.max()]
-        # decoder_data = pd.concat(
-        #     [last_data.assign(date=lambda x: x.date + pd.offsets.MonthBegin(i)) for i in range(1, max_prediction_length + 1)],
-        #     ignore_index=True,
-        # )
-
-        # # add time index consistent with "data"
-        # decoder_data["time_idx"] = decoder_data["date"].dt.year * 12 + decoder_data["date"].dt.month
-        # decoder_data["time_idx"] += encoder_data["time_idx"].max() + 1 - decoder_data["time_idx"].min()
-
-        # # adjust additional time feature(s)
-        # decoder_data["month"] = decoder_data.date.dt.month.astype(str).astype("category")  # categories have be strings
-
-        # # combine encoder and decoder data
-        # new_prediction_data = pd.concat([encoder_data, decoder_data], ignore_index=True)
-        # new_raw_predictions, new_x = best_tft.predict(new_prediction_data, mode="raw", return_x=True)
-
-        # for idx in range(10):  # plot 10 examples
-        #     fig = best_tft.plot_prediction(new_x, new_raw_predictions, idx=idx, show_future_observed=False)
-        #     fig.set_size_inches(15, 15)
-        #     plt.savefig("figures/new_prediction_{}.png".format(idx))
-        #     plt.close(fig)
 
     
     def print_baseline(self):
