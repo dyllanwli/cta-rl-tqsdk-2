@@ -37,7 +37,8 @@ class ModelTrainer:
         data = [np.load("./tmp/X.npy"), np.load("./tmp/y.npy")]
 
         model = TTCModel(data)
-        model.train()
+        # model.train()
+        model.tune()
         # model.predict()
         
         # model.print_baseline()

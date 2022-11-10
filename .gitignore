@@ -5,6 +5,7 @@ config.yaml
 # log
 wandb/
 figures/
+keras_tuner/
 
 # checkpoints
 checkpoints/

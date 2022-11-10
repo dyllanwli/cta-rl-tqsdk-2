@@ -9,6 +9,7 @@ import pandas as pd
 import tensorflow as tf
 from tensorflow import keras
 from keras import layers, Model, models
+import keras_tuner as kt
 import numpy as np
 from datetime import datetime 
 from tqdm import tqdm
@@ -18,12 +19,14 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from wandb.keras import WandbCallback
 
+from utils.constant import mlp_units_dict
+
 class TTCModel:
     def __init__(self, data: pd.DataFrame):
         print('GPU name: ', tf.config.list_physical_devices('GPU'))
         self.n_classes = 5
         self.train_col_name = ["open", "high", "low", "close", "vol", "open_oi", "close_oi", "is_daytime"]
-        max_encoder_length = 80
+        max_encoder_length = 90
         max_label_length = 10
         if isinstance(data, pd.DataFrame):
             X, y = self.pre_process_saving(data, max_encoder_length, max_label_length)
@@ -35,7 +38,7 @@ class TTCModel:
         else:
             X, y = data
         X = self.timeseries_normalize(X)
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.33, random_state=42, shuffle=False)
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=False)
         self.input_shape = self.X_train.shape[1:]
     
     def timeseries_normalize(self, data: np.ndarray):
@@ -47,7 +50,7 @@ class TTCModel:
             # print(data[subset])
         return data
     
-    def pre_process_saving(self, data: pd.DataFrame, max_encode_length: int = 80, max_label_length: int = 10):
+    def pre_process_saving(self, data: pd.DataFrame, max_encode_length: int, max_label_length: int):
         def set_volatility_label(df: pd.DataFrame, max_label_length):
             """
                 check if the price changes by percentage within max_label_length step
@@ -122,14 +125,25 @@ class TTCModel:
     def build_model(
         self,
         input_shape,
-        head_size,
-        num_heads,
-        ff_dim,
-        num_transformer_blocks,
-        mlp_units,
+        head_size: int,
+        num_heads: int,
+        ff_dim: int,
+        num_transformer_blocks: int,
+        mlp_units: list,
         dropout=0,
         mlp_dropout=0,
+        hp = False,
     ) -> Model:
+        if hp:
+            # hyperparameter tuning
+            head_size = hp.Int("head_size", min_value=64, max_value=512, step=64)
+            num_heads = hp.Int("num_heads", min_value=1, max_value=8, step=1)
+            ff_dim = hp.Int("ff_dim", min_value=2, max_value=8, step=1)
+            mlp_dropout = hp.Float("mlp_dropout", min_value=0.1, max_value=0.5, step=0.1)
+            dropout = hp.Float("dropout", min_value=0.2, max_value=0.4, step=0.05)
+
+            mlp_units_key = hp.Choice("mlp_units", values=[0,1,2,3,4,5,6,7])
+            mlp_units = mlp_units_dict[mlp_units_key]
         inputs = keras.Input(shape=input_shape)
         x = inputs
         for _ in range(num_transformer_blocks):
@@ -143,6 +157,9 @@ class TTCModel:
         return Model(inputs, outputs)
 
     def transformer_encoder(self, inputs, head_size, num_heads, ff_dim, dropout=0):
+        """
+        Create a single transformer encoder block.
+        """
         # Normalization and Attention
         x = layers.LayerNormalization(epsilon=1e-6)(inputs)
         x = layers.MultiHeadAttention(
@@ -157,10 +174,11 @@ class TTCModel:
         x = layers.Dropout(dropout)(x)
         x = layers.Conv1D(filters=inputs.shape[-1], kernel_size=1)(x)
         return x + res
-
-    def train(self,):
-        wandb.init(project="ts_prediction")
-
+    
+    def model_builder(self, hp = False) -> Model:
+        """
+        Build the model with hyperparameters
+        """
         model = self.build_model(
             self.input_shape,
             head_size=256,
@@ -170,14 +188,64 @@ class TTCModel:
             mlp_units=[128],
             mlp_dropout=0.4,
             dropout=0.25,
+            hp = hp,
         )
+
+        lr = hp.Choice("learning_rate", values=[1e-3, 1e-4, 1e-5]) if hp else 1e-4
 
         model.compile(
             loss="sparse_categorical_crossentropy",
-            optimizer=keras.optimizers.Adam(learning_rate=1e-4),
+            optimizer=keras.optimizers.Adam(learning_rate=lr),
             metrics=["sparse_categorical_accuracy"],
         )
         model.summary()
+        return model
+    
+    def tune(self):
+        """
+        Tune hyperparameters
+        """
+        wandb.init(project="ts_prediction", group="tune")
+        tuner = kt.Hyperband(self.model_builder,
+                     objective='val_accuracy',
+                     max_epochs=10,
+                     factor=3,
+                     directory='keras_tuner',
+                     project_name='ttc_tuner')
+
+        callbacks = [
+            keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True, monitor="val_loss"), 
+            WandbCallback(save_model=True, monitor="sparse_categorical_accuracy", mode="max")
+        ]
+
+        tuner.search(self.X_train, self.y_train, epochs=500, validation_split=0.2, callbacks=callbacks)
+
+        best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+
+        # Get the optimal hyperparameters
+        best_hps=tuner.get_best_hyperparameters(num_trials=1)[0]
+
+        print(f"""
+        The hyperparameter search is complete. The optimal number of units in the first densely-connected
+        layer is {best_hps.get('units')} and the optimal learning rate for the optimizer
+        is {best_hps.get('learning_rate')}.
+        """)
+
+        model = tuner.hypermodel.build(best_hps)
+
+        history = model.fit(self.X_train, self.y_train, epochs=50, validation_split=0.2, callbacks=callbacks)
+
+        hypermodel = tuner.hypermodel.build(best_hps)
+
+        # Retrain the model
+        hypermodel.fit(self.X_train, self.y_train, epochs=50, validation_split=0.2, callbacks=callbacks)
+
+        eval_result = hypermodel.evaluate(self.X_test, self.y_test)
+        print("[test loss, test accuracy]:", eval_result)
+
+    def train(self):
+        wandb.init(project="ts_prediction")
+        model = self.model_builder()
 
         callbacks = [
             keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True), 
@@ -187,10 +255,10 @@ class TTCModel:
         model.fit(
             self.X_train,
             self.y_train,
-            validation_split=0.2,
-            epochs=30,
+            validation_split=0.25,
+            epochs=50,
             batch_size=256,
-            shuffle=False,
+            shuffle=False, # should not shuffle the data, cuz the data is time series
             callbacks=callbacks,
         )
 

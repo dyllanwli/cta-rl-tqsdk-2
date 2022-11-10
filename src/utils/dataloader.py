@@ -139,7 +139,7 @@ class DataLoader:
     def get_offline_data(self, interval: str, instrument_id: str, offset: int, fixed_offset: bool = True, fixed_dt: bool = False) -> pd.DataFrame:
         if fixed_dt:
             df = self.mongo.load_bar_data(instrument_id, self.start_dt, self.end_dt, interval, limit=offset)
-            print("dataloader: Loaded offline data with fixed_dt from", self.start_dt, "with legnth", df.shape[0])
+            print("dataloader: Loaded offline data from ", self.start_dt, "with", df.shape[0], "to", df.iloc[-1].datetime)
             return df
         low_dt = time_to_s_timestamp(self.start_dt)
         high_dt = time_to_s_timestamp(self.end_dt)

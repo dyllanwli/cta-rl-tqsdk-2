@@ -14,3 +14,4 @@ pip install -U "ray[serve]"  # installs Ray + dependencies for Ray Serve
 pip install autokeras
 pip install -U modin
 pip install pytorch-forecasting
+pip install -q -U keras-tuner
