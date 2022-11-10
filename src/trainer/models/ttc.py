@@ -38,7 +38,7 @@ class TTCModel:
         else:
             X, y = data
         X = self.timeseries_normalize(X)
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=False)
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.33, random_state=42, shuffle=False)
         self.input_shape = self.X_train.shape[1:]
     
     def timeseries_normalize(self, data: np.ndarray):
@@ -136,14 +136,14 @@ class TTCModel:
     ) -> Model:
         if hp:
             # hyperparameter tuning
-            head_size = hp.Int("head_size", min_value=64, max_value=512, step=64)
-            num_heads = hp.Int("num_heads", min_value=1, max_value=8, step=1)
+            head_size = hp.Int("head_size", min_value=128, max_value=512, step=64)
+            num_heads = hp.Int("num_heads", min_value=1, max_value=6, step=1)
             ff_dim = hp.Int("ff_dim", min_value=2, max_value=8, step=1)
             mlp_dropout = hp.Float("mlp_dropout", min_value=0.1, max_value=0.5, step=0.1)
             dropout = hp.Float("dropout", min_value=0.2, max_value=0.4, step=0.05)
 
-            mlp_units_key = hp.Choice("mlp_units", values=[0,1,2,3,4,5,6,7])
-            mlp_units = mlp_units_dict[mlp_units_key]
+            # mlp_units_key = hp.Choice("mlp_units", values=[0,1,2,3,4])
+            # mlp_units = mlp_units_dict[mlp_units_key]
         inputs = keras.Input(shape=input_shape)
         x = inputs
         for _ in range(num_transformer_blocks):
@@ -207,33 +207,31 @@ class TTCModel:
         """
         wandb.init(project="ts_prediction", group="tune")
         tuner = kt.Hyperband(self.model_builder,
-                     objective='val_accuracy',
-                     max_epochs=10,
+                     objective='sparse_categorical_accuracy',
+                     max_epochs=5,
                      factor=3,
                      directory='keras_tuner',
                      project_name='ttc_tuner')
 
         callbacks = [
             keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True, monitor="val_loss"), 
-            WandbCallback(save_model=True, monitor="sparse_categorical_accuracy", mode="max")
+            WandbCallback(save_model=False, monitor="sparse_categorical_accuracy", mode="max"),
+            tf.keras.callbacks.TensorBoard(log_dir="./logs"),
         ]
+        print("Start tuning")
 
-        tuner.search(self.X_train, self.y_train, epochs=500, validation_split=0.2, callbacks=callbacks)
+        # tuner.search(self.X_train, self.y_train, epochs=50, validation_split=0.2, callbacks=callbacks)
 
         best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+        print(best_hps.get_config())
 
         # Get the optimal hyperparameters
         best_hps=tuner.get_best_hyperparameters(num_trials=1)[0]
 
-        print(f"""
-        The hyperparameter search is complete. The optimal number of units in the first densely-connected
-        layer is {best_hps.get('units')} and the optimal learning rate for the optimizer
-        is {best_hps.get('learning_rate')}.
-        """)
 
         model = tuner.hypermodel.build(best_hps)
 
-        history = model.fit(self.X_train, self.y_train, epochs=50, validation_split=0.2, callbacks=callbacks)
+        # history = model.fit(self.X_train, self.y_train, epochs=50, validation_split=0.2, callbacks=callbacks)
 
         hypermodel = tuner.hypermodel.build(best_hps)
 
