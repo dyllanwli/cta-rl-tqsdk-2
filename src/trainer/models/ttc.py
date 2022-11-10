@@ -38,7 +38,7 @@ class TTCModel:
         else:
             X, y = data
         X = self.timeseries_normalize(X)
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.33, random_state=42, shuffle=False)
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.3, random_state=42, shuffle=False)
         self.input_shape = self.X_train.shape[1:]
     
     def timeseries_normalize(self, data: np.ndarray):
@@ -136,14 +136,15 @@ class TTCModel:
     ) -> Model:
         if hp:
             # hyperparameter tuning
-            head_size = hp.Int("head_size", min_value=128, max_value=512, step=64)
-            num_heads = hp.Int("num_heads", min_value=1, max_value=6, step=1)
-            ff_dim = hp.Int("ff_dim", min_value=2, max_value=8, step=1)
-            mlp_dropout = hp.Float("mlp_dropout", min_value=0.1, max_value=0.5, step=0.1)
-            dropout = hp.Float("dropout", min_value=0.2, max_value=0.4, step=0.05)
+            # head_size = hp.Int("head_size", min_value=128, max_value=512, step=64)
+            # num_heads = hp.Int("num_heads", min_value=1, max_value=6, step=1)
+            # ff_dim = hp.Int("ff_dim", min_value=2, max_value=8, step=1)
+            # mlp_dropout = hp.Float("mlp_dropout", min_value=0.1, max_value=0.5, step=0.1)
+            # dropout = hp.Float("dropout", min_value=0.2, max_value=0.4, step=0.05)
+            num_transformer_blocks = hp.Int("num_transformer_blocks", min_value=3, max_value=6, step=1)
 
-            # mlp_units_key = hp.Choice("mlp_units", values=[0,1,2,3,4])
-            # mlp_units = mlp_units_dict[mlp_units_key]
+            mlp_units_key = hp.Choice("mlp_units", values=[0,1,2,3,4], default=0)
+            mlp_units = mlp_units_dict[mlp_units_key]
         inputs = keras.Input(shape=input_shape)
         x = inputs
         for _ in range(num_transformer_blocks):
@@ -186,12 +187,12 @@ class TTCModel:
             ff_dim=4,
             num_transformer_blocks=4,
             mlp_units=[128],
-            mlp_dropout=0.4,
-            dropout=0.25,
+            mlp_dropout=0.3,
+            dropout=0.3,
             hp = hp,
         )
 
-        lr = hp.Choice("learning_rate", values=[1e-3, 1e-4, 1e-5]) if hp else 1e-4
+        lr = 1e-4
 
         model.compile(
             loss="sparse_categorical_crossentropy",
@@ -220,17 +221,16 @@ class TTCModel:
         ]
         print("Start tuning")
 
-        # tuner.search(self.X_train, self.y_train, epochs=50, validation_split=0.2, callbacks=callbacks)
+        tuner.search(self.X_train, self.y_train, epochs=50, validation_split=0.2, callbacks=callbacks)
 
         best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
-        print(best_hps.get_config())
+        print(best_hps.get_config()['values'])
 
         # Get the optimal hyperparameters
         best_hps=tuner.get_best_hyperparameters(num_trials=1)[0]
 
 
-        model = tuner.hypermodel.build(best_hps)
-
+        # model = tuner.hypermodel.build(best_hps)
         # history = model.fit(self.X_train, self.y_train, epochs=50, validation_split=0.2, callbacks=callbacks)
 
         hypermodel = tuner.hypermodel.build(best_hps)
