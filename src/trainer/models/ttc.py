@@ -24,27 +24,43 @@ from utils.constant import mlp_units_dict
 class TTCModel:
     def __init__(self):
         print('GPU name: ', tf.config.list_physical_devices('GPU'))
-        self.project_name = "ts_prediction"
+        self.project_name = "ts_prediction_2"
         self.n_classes = 5
         self.train_col_name = ["open", "high", "low", "close", "vol", "open_oi", "close_oi", "is_daytime"]
-        self.max_encode_length = 90
-        self.max_label_length = 10
+        self.fit_config = {
+            "batch_size": 128,
+            "epochs": 100,
+            "validation_split": 0.25,
+            "shuffle": True,
+        }
     
-    def set_training_data(self, data: pd.DataFrame):
+    def set_training_data(self, data: pd.DataFrame, max_encode_length: int = 60, max_label_length: int = 5):
+        self.max_encode_length = max_encode_length
+        self.max_label_length = max_label_length
         if isinstance(data, pd.DataFrame):
             X, y = self.pre_process_saving(data)
             c = np.array(np.unique(y, return_counts=True)).T
             print("Class distribution: ", c)
             print("Saving data")
-            np.save("./tmp/X.npy", X)
-            np.save("./tmp/y.npy", y)
+            np.save("./tmp/X_{}_{}.npy".format(self.max_encode_length, self.max_label_length), X)
+            np.save("./tmp/y_{}_{}.npy".format(self.max_encode_length, self.max_label_length), y)
         else:
             X, y = data
         X = self.timeseries_normalize(X)
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.3, random_state=42, shuffle=False)
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=False)
         self.input_shape = self.X_train.shape[1:]
-
     
+    def set_predict_data(self, data: pd.DataFrame, max_encode_length: int = 60, max_label_length: int = 5):
+        self.max_encode_length = max_encode_length
+        self.max_label_length = max_label_length
+        print("Set predict data")
+        X_predict, y = self.pre_process_saving(data)
+        c = np.array(np.unique(y, return_counts=True)).T
+        print("Class distribution: ", c)
+        # np.save("./tmp/X_predict.npy", X)
+        # np.save("./tmp/y_predict.npy", y)
+        return X_predict, y
+
     def timeseries_normalize(self, data: np.ndarray):
         print("Start normalizing data")
         for subset in tqdm(range(data.shape[0])):
@@ -70,8 +86,16 @@ class TTCModel:
                 e.g.
                     -inf ~ -0.01 | -0.01 ~ -0.005 | -0.005 ~ 0.005 | 0.005 ~ 0.01 | 0.01 ~ inf
             """
-            low = 0.005/3
-            high = 0.01/3
+            low_by_label_length = {
+                10: 0.0015, # 0.15%
+                5: 0.00075, # 0.075%
+            }
+            high_by_label_length = {
+                10: 0.003, # 0.3%
+                5: 0.0015, # 0.15%
+            }
+            low = low_by_label_length[self.max_label_length]
+            high = high_by_label_length[self.max_label_length]
 
             # reset the index from 0 to df.shape[0]
             df = df.reset_index(drop=True).reset_index()
@@ -141,14 +165,13 @@ class TTCModel:
     ) -> Model:
         if hp:
             # hyperparameter tuning
-            # head_size = hp.Int("head_size", min_value=128, max_value=512, step=64)
-            # num_heads = hp.Int("num_heads", min_value=1, max_value=6, step=1)
-            # ff_dim = hp.Int("ff_dim", min_value=2, max_value=8, step=1)
-            # mlp_dropout = hp.Float("mlp_dropout", min_value=0.1, max_value=0.5, step=0.1)
-            # dropout = hp.Float("dropout", min_value=0.2, max_value=0.4, step=0.05)
-            num_transformer_blocks = hp.Int("num_transformer_blocks", min_value=3, max_value=6, step=1)
-
-            mlp_units_key = hp.Choice("mlp_units", values=[0,1,2,3,4], default=0)
+            head_size = hp.Int("head_size", min_value=128, max_value=512, step=64)
+            num_heads = hp.Int("num_heads", min_value=1, max_value=6, step=1)
+            ff_dim = hp.Int("ff_dim", min_value=2, max_value=8, step=1)
+            mlp_dropout = hp.Float("mlp_dropout", min_value=0.1, max_value=0.5, step=0.1)
+            dropout = hp.Float("dropout", min_value=0.2, max_value=0.4, step=0.05)
+            num_transformer_blocks = hp.Int("num_transformer_blocks", min_value=3, max_value=8, step=1)
+            mlp_units_key = hp.Choice("mlp_units", values=[0,1,2,3,4,5,6,7], default=0)
             mlp_units = mlp_units_dict[mlp_units_key]
         inputs = keras.Input(shape=input_shape)
         x = inputs
@@ -214,10 +237,10 @@ class TTCModel:
         wandb.init(project=self.project_name, group="tune")
         tuner = kt.Hyperband(self.model_builder,
                      objective='sparse_categorical_accuracy',
-                     max_epochs=5,
+                     max_epochs=50,
                      factor=3,
                      directory='keras_tuner',
-                     project_name='ttc_tuner')
+                     project_name='ttc_tuner_{}_{}'.format(self.max_encode_length, self.max_label_length))
 
         callbacks = [
             keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True, monitor="val_loss"), 
@@ -226,13 +249,15 @@ class TTCModel:
         ]
         print("Start tuning")
 
-        tuner.search(self.X_train, self.y_train, epochs=50, validation_split=0.2, callbacks=callbacks)
+        tuner.search(self.X_train, self.y_train, 
+            epochs=200, validation_split=0.2, 
+            callbacks=callbacks, shuffle=True, batch_size=128)
 
         best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
-        print("Best config", best_hps.get_config()['values'])
-
-        # Get the optimal hyperparameters
-        best_hps=tuner.get_best_hyperparameters(num_trials=1)[0]
+        best_hps_config = best_hps.get_config()['values']
+        print("Best config", best_hps_config)
+        # set config to wandb
+        wandb.config.update(best_hps_config)
 
         # model = tuner.hypermodel.build(best_hps)
         # history = model.fit(self.X_train, self.y_train, epochs=50, validation_split=0.2, callbacks=callbacks)
@@ -240,7 +265,15 @@ class TTCModel:
         hypermodel = tuner.hypermodel.build(best_hps)
 
         # Retrain the model
-        hypermodel.fit(self.X_train, self.y_train, epochs=50, validation_split=0.2, callbacks=callbacks)
+        hypermodel.fit(
+            self.X_train,
+            self.y_train,
+            validation_split=self.fit_config["validation_split"],
+            epochs=self.fit_config["epochs"],
+            batch_size=self.fit_config["batch_size"],
+            shuffle=self.fit_config["shuffle"], 
+            callbacks=callbacks,
+        )
 
         eval_result = hypermodel.evaluate(self.X_test, self.y_test)
         print("[test loss, test accuracy]:", eval_result)
@@ -257,10 +290,11 @@ class TTCModel:
         model.fit(
             self.X_train,
             self.y_train,
-            validation_split=0.25,
-            epochs=50,
-            batch_size=256,
-            shuffle=False, # should not shuffle the data, cuz the data is time series
+            validation_split=self.fit_config["validation_split"],
+            epochs=self.fit_config["epochs"],
+            batch_size=self.fit_config["batch_size"],
+            shuffle=self.fit_config["shuffle"], 
+            use_multiprocessing=self.fit_config["use_multiprocessing"],
             callbacks=callbacks,
         )
 
@@ -268,15 +302,6 @@ class TTCModel:
         print("Test loss:", test_loss)
         print("Test accuracy:", test_acc)
         return model
-    
-    def set_predict_data(self, data: pd.DataFrame):
-        print("Set predict data")
-        X_predict, y = self.pre_process_saving(data)
-        c = np.array(np.unique(y, return_counts=True)).T
-        print("Class distribution: ", c)
-        # np.save("./tmp/X_predict.npy", X)
-        # np.save("./tmp/y_predict.npy", y)
-        return X_predict, y
 
     def predict(self, model, X_predict, y):
         if isinstance(model, str):
@@ -284,11 +309,15 @@ class TTCModel:
         # wandb.init(project=self.project_name, group="predict")
 
         X_predict_norm = self.timeseries_normalize(X_predict)
-        print("X_predict_norm shape: ", X_predict_norm.shape)
 
-        predict = model.predict(X_predict_norm, batch_size=1)
+        eval_result = model.evaluate(X_predict_norm, y)
+        print("[predict loss, predict accuracy]:", eval_result)
+
+        print("X_predict_norm shape: ", X_predict_norm.shape)
+        for x in X_predict_norm:
+            predict = model(np.array([x]), training=False)
             # close_price = X_predict[i, -1, 3]
             # print(predict, close_price, y)
-            # break
+            break
         print(predict)
 
