@@ -30,6 +30,14 @@ import tensorboard as tb
 tf.io.gfile = tb.compat.tensorflow_stub.io.gfile
 
 class TFTModel:
+    """
+
+    # model.print_baseline()
+    # model.get_optimal_lr()
+    # trainer = model.train()
+    # model.test_predict(trainer="/h/diya.li/quant/cta-rl-tqsdk-2/src/lightning_logs/lightning_logs/version_2/checkpoints/epoch=13-step=37058.ckpt")
+    # model.tune()
+    """
     def __init__(self,
         data: pd.DataFrame,
         batch_size: int = 128,

@@ -22,14 +22,17 @@ from wandb.keras import WandbCallback
 from utils.constant import mlp_units_dict
 
 class TTCModel:
-    def __init__(self, data: pd.DataFrame):
+    def __init__(self):
         print('GPU name: ', tf.config.list_physical_devices('GPU'))
+        self.project_name = "ts_prediction"
         self.n_classes = 5
         self.train_col_name = ["open", "high", "low", "close", "vol", "open_oi", "close_oi", "is_daytime"]
-        max_encoder_length = 90
-        max_label_length = 10
+        self.max_encode_length = 90
+        self.max_label_length = 10
+    
+    def set_training_data(self, data: pd.DataFrame):
         if isinstance(data, pd.DataFrame):
-            X, y = self.pre_process_saving(data, max_encoder_length, max_label_length)
+            X, y = self.pre_process_saving(data)
             c = np.array(np.unique(y, return_counts=True)).T
             print("Class distribution: ", c)
             print("Saving data")
@@ -40,18 +43,25 @@ class TTCModel:
         X = self.timeseries_normalize(X)
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.3, random_state=42, shuffle=False)
         self.input_shape = self.X_train.shape[1:]
+
     
     def timeseries_normalize(self, data: np.ndarray):
         print("Start normalizing data")
         for subset in tqdm(range(data.shape[0])):
-            # subset shpae: (max_encode_length, 8)
+            # subset shpae: (self.max_encode_length, 8)
             scaler = MinMaxScaler(feature_range=(0, 2))
             data[subset] = scaler.fit_transform(data[subset])
             # print(data[subset])
         return data
     
-    def pre_process_saving(self, data: pd.DataFrame, max_encode_length: int, max_label_length: int):
-        def set_volatility_label(df: pd.DataFrame, max_label_length):
+    def _process_datatime(self, df: pd.DataFrame):
+        exchange_tz = pytz.timezone('Asia/Shanghai')
+        df["datetime"] =  df["datetime"].apply(lambda x: datetime.utcfromtimestamp(x.value / 1e9).astimezone(exchange_tz))
+        df["is_daytime"] = df["datetime"].apply(lambda x: x.hour * 60 + x.minute)
+        return df
+    
+    def pre_process_saving(self, data: pd.DataFrame):
+        def set_volatility_label(df: pd.DataFrame):
             """
                 check if the price changes by percentage within max_label_length step
                 n_classes = 5
@@ -66,12 +76,12 @@ class TTCModel:
             # reset the index from 0 to df.shape[0]
             df = df.reset_index(drop=True).reset_index()
 
-            def check_volatility(row, offset):
+            def check_volatility(row):
                 idx = row["index"]
-                if idx + max_label_length >= df.shape[0]:
+                if idx + self.max_label_length >= df.shape[0]:
                     return np.nan
                 else:
-                    vol = df.iloc[idx + offset]['close'] / df.iloc[idx]['close'] - 1
+                    vol = df.iloc[idx + self.max_label_length]['close'] / df.iloc[idx]['close'] - 1
                     if vol < -high:
                         return 0
                     elif -high < vol < -low:
@@ -85,42 +95,37 @@ class TTCModel:
                     else:
                         return np.nan
             
-            df['vol'] = df.apply(lambda row: check_volatility(row, max_label_length), axis=1)
+            df['vol'] = df.apply(lambda row: check_volatility(row), axis=1)
             return df
 
-        def pre_process(df: pd.DataFrame, max_encode_length, max_label_length, is_train = True):
+        def pre_process(df: pd.DataFrame):
             print("Start preprocessing data")
             df = pd.DataFrame(df)
-            exchange_tz = pytz.timezone('Asia/Shanghai')
-            df["datetime"] =  df["datetime"].apply(lambda x: datetime.utcfromtimestamp(x.value / 1e9).astimezone(exchange_tz))
-            df["is_daytime"] = df["datetime"].apply(lambda x: x.hour * 60 + x.minute)
+            df = self._process_datatime(df)
             train = []
             target = []
             def process_by_group(g) -> pd.DataFrame:        
-                g = set_volatility_label(g, max_label_length)
+                g = set_volatility_label(g)
                 print(g["vol"].value_counts())
                 g = g[self.train_col_name].dropna()
                 target_list = []
                 train_list = []
-                for i in tqdm(range(g.shape[0] - max_encode_length)):
+                for i in tqdm(range(g.shape[0] - self.max_encode_length)):
                     # yield training, target 
-                    train, target = g.iloc[i:i+max_encode_length].to_numpy(dtype=np.float32), g.iloc[i+max_encode_length]["vol"]
+                    train, target = g.iloc[i:i+self.max_encode_length].to_numpy(dtype=np.float32), g.iloc[i+self.max_encode_length]["vol"]
                     train_list.append(train)
                     target_list.append(target)
                 return train_list, target_list 
             print("Start processing group")
             for g_name, g in df.groupby("underlying_symbol"):
                 print("Processing group: ", g_name)
-                if is_train:
-                    x, y = process_by_group(g)
-                else:
-                    x, y = g[self.train_col_name].dropna(), None
+                x, y = process_by_group(g)
                 train += x
                 target += y
             print("Preprocess data done.")
             return np.array(train), np.array(target)
-
-        return pre_process(data, max_encode_length, max_label_length)
+        # start preprocessing
+        return pre_process(data)
 
     def build_model(
         self,
@@ -185,8 +190,8 @@ class TTCModel:
             head_size=256,
             num_heads=4,
             ff_dim=4,
-            num_transformer_blocks=4,
-            mlp_units=[128],
+            num_transformer_blocks=6,
+            mlp_units=[256, 128],
             mlp_dropout=0.3,
             dropout=0.3,
             hp = hp,
@@ -206,7 +211,7 @@ class TTCModel:
         """
         Tune hyperparameters
         """
-        wandb.init(project="ts_prediction", group="tune")
+        wandb.init(project=self.project_name, group="tune")
         tuner = kt.Hyperband(self.model_builder,
                      objective='sparse_categorical_accuracy',
                      max_epochs=5,
@@ -215,20 +220,19 @@ class TTCModel:
                      project_name='ttc_tuner')
 
         callbacks = [
-            keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True, monitor="val_loss"), 
+            keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True, monitor="val_loss"), 
             WandbCallback(save_model=False, monitor="sparse_categorical_accuracy", mode="max"),
-            tf.keras.callbacks.TensorBoard(log_dir="./logs"),
+            # tf.keras.callbacks.TensorBoard(log_dir="./logs"),
         ]
         print("Start tuning")
 
         tuner.search(self.X_train, self.y_train, epochs=50, validation_split=0.2, callbacks=callbacks)
 
         best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
-        print(best_hps.get_config()['values'])
+        print("Best config", best_hps.get_config()['values'])
 
         # Get the optimal hyperparameters
         best_hps=tuner.get_best_hyperparameters(num_trials=1)[0]
-
 
         # model = tuner.hypermodel.build(best_hps)
         # history = model.fit(self.X_train, self.y_train, epochs=50, validation_split=0.2, callbacks=callbacks)
@@ -242,7 +246,7 @@ class TTCModel:
         print("[test loss, test accuracy]:", eval_result)
 
     def train(self):
-        wandb.init(project="ts_prediction")
+        wandb.init(project=self.project_name, group="train")
         model = self.model_builder()
 
         callbacks = [
@@ -264,10 +268,27 @@ class TTCModel:
         print("Test loss:", test_loss)
         print("Test accuracy:", test_acc)
         return model
+    
+    def set_predict_data(self, data: pd.DataFrame):
+        print("Set predict data")
+        X_predict, y = self.pre_process_saving(data)
+        c = np.array(np.unique(y, return_counts=True)).T
+        print("Class distribution: ", c)
+        # np.save("./tmp/X_predict.npy", X)
+        # np.save("./tmp/y_predict.npy", y)
+        return X_predict, y
 
-    def predict(self, model, data):
+    def predict(self, model, X_predict, y):
         if isinstance(model, str):
             model: Model = models.load_model(model)
-        result = model.predict(data)
-        return result
+        # wandb.init(project=self.project_name, group="predict")
+
+        X_predict_norm = self.timeseries_normalize(X_predict)
+        print("X_predict_norm shape: ", X_predict_norm.shape)
+
+        predict = model.predict(X_predict_norm, batch_size=1)
+            # close_price = X_predict[i, -1, 3]
+            # print(predict, close_price, y)
+            # break
+        print(predict)
 

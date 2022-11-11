@@ -1,6 +1,7 @@
-# config
+# config & models
 config.yaml
 *.npy
+*.h5
 
 # log
 wandb/
