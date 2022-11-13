@@ -24,12 +24,15 @@ from wandb.keras import WandbCallback
 from utils.constant import mlp_units_dict, low_by_label_length, high_by_label_length
 
 class TTCModel:
-    def __init__(self, interval: str, commodity_name: str):
+    def __init__(self, interval: str, commodity_name: str, max_encode_length: int = 60, max_label_length: int = 5):
         ray.init(num_cpus = 62, include_dashboard=False)
         print('GPU name: ', tf.config.list_physical_devices('GPU'))
         self.project_name = "ts_prediction_2"
-        self.interval = interval
         self.commodity_name = commodity_name
+        self.interval = interval
+        self.max_encode_length = max_encode_length
+        self.max_label_length = max_label_length
+
         self.n_classes = 5
         self.train_col_name = ["open", "high", "low", "close", "vol", "open_oi", "close_oi", "is_daytime"]
         self.fit_config = {
@@ -38,27 +41,27 @@ class TTCModel:
             "validation_split": 0.25,
             "shuffle": True,
         }
+        self.X_output_path = "./tmp/X_{}{}_{}_{}.npy".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length)
+        self.y_output_path = "./tmp/y_{}{}_{}_{}.npy".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length)
+        
     
-    def set_training_data(self, data: pd.DataFrame, max_encode_length: int = 60, max_label_length: int = 5):
-        self.max_encode_length = max_encode_length
-        self.max_label_length = max_label_length
+    def set_training_data(self, data: pd.DataFrame):
         if isinstance(data, pandas.DataFrame):
             X, y = self.pre_process_data(data)
             c = np.array(np.unique(y, return_counts=True)).T
             print("Class distribution: ", c)
             print("Saving data")
-            np.save("./tmp/X_{}{}_{}_{}.npy".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length), X)
-            np.save("./tmp/y_{}{}_{}_{}.npy".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length), y)
+            np.save(self.X_output_path, X)
+            np.save(self.y_output_path, y)
         else:
-            X, y = data
+            X = np.load(self.X_output_path)
+            y = np.load(self.y_output_path)
         X = self.timeseries_normalize(X)
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=False)
         del X, y
         self.input_shape = self.X_train.shape[1:]
     
-    def set_predict_data(self, data: pd.DataFrame, max_encode_length: int = 60, max_label_length: int = 5):
-        self.max_encode_length = max_encode_length
-        self.max_label_length = max_label_length
+    def set_predict_data(self, data: pd.DataFrame):
         print("Set predict data")
         X_predict, y = self.pre_process_data(data)
         c = np.array(np.unique(y, return_counts=True)).T
@@ -69,11 +72,11 @@ class TTCModel:
 
     def timeseries_normalize(self, data: np.ndarray):
         print("Normalizing data")
-        for subset in tqdm(range(data.shape[0])):
-            # subset shpae: (self.max_encode_length, 8)
+        @ray.remote
+        def normalize(subset):
             scaler = MinMaxScaler(feature_range=(0, 2))
-            data[subset] = scaler.fit_transform(data[subset])
-            # print(data[subset])
+            return scaler.fit_transform(subset)
+        data = [normalize.remote(subset) for subset in data]
         return data
     
     def _process_datatime(self, df: pd.DataFrame):
@@ -249,7 +252,7 @@ class TTCModel:
                      max_epochs=50,
                      factor=3,
                      directory='keras_tuner',
-                     project_name='ttc_tuner_{}_{}'.format(self.max_encode_length, self.max_label_length))
+                     project_name='ttc_tuner_{}_{}_{}_{}'.format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length))
 
         callbacks = [
             keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True, monitor="val_loss"), 
