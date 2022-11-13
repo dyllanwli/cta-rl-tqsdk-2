@@ -5,7 +5,7 @@
 #SBATCH --time=24:00:00              
 #SBATCH --ntasks=1                  
 #SBATCH --cpus-per-task=64          
-#SBATCH --mem=128G                   
+#SBATCH --mem=180G                   
 #SBATCH --output=%j.a100.log
 #SBATCH --partition=gpu              
 #SBATCH --gres=gpu:a100:1           
