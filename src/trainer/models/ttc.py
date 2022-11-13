@@ -242,7 +242,7 @@ class TTCModel:
         model.summary()
         return model
     
-    def tune(self):
+    def tune(self, search_data_ratio: float = 0.5):
         """
         Tune hyperparameters
         """
@@ -260,8 +260,9 @@ class TTCModel:
             # tf.keras.callbacks.TensorBoard(log_dir="./logs"),
         ]
         print("Start tuning")
-
-        tuner.search(self.X_train, self.y_train, 
+        tuner.search(
+            self.X_train[:int(len(self.X_train)*search_data_ratio)],
+            self.y_train[:int(len(self.y_train)*search_data_ratio)], 
             epochs=500, validation_split=self.fit_config["validation_split"],
             callbacks=callbacks, shuffle=True, batch_size=self.fit_config["batch_size"])
 
