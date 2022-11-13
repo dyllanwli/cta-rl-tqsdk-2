@@ -29,7 +29,7 @@ class ModelTrainer:
         return offline_data
 
     def run(self, is_train=True):
-        model = TTCModel(interval=self.interval, commodity_name=self.commodity, max_encode_length=120, max_label_length=5)
+        model = TTCModel(interval=self.interval, commodity_name=self.commodity, max_encode_length=120, max_label_length=10)
         if is_train:
             # data = self.get_training_data()
             model.set_training_data(None)

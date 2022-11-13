@@ -5,7 +5,7 @@
 #SBATCH --time=24:00:00              
 #SBATCH --ntasks=1                  
 #SBATCH --cpus-per-task=64          
-#SBATCH --mem=180G                   
+#SBATCH --mem=128G                   
 #SBATCH --output=%j.a100.log
 #SBATCH --partition=gpu              
 #SBATCH --gres=gpu:a100:1           
@@ -21,7 +21,7 @@ conda init bash
 conda activate quant
 # conda activate $SCRATCH/.conda/envs/quant
 nvidia-smi
-
+export LD_LIBRARY_PATH=${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH}
 pip --version # check if the correct python version is used
 
 cd ../src; python mt_train.py

@@ -1,5 +1,5 @@
 conda activate quant
-conda install -c conda-forge cudatoolkit=11.2 cudnn=8.1.0
+conda install -c conda-forge cudatoolkit=11.4 cudnn=8.1.0
 pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu116
 pip install -U tensorflow
 pip install pytorch-forecasting
