@@ -2,12 +2,14 @@ from datetime import date, datetime
 
 import pandas as pd
 import numpy as np
-from utils.utils import Interval, max_step_by_day, get_auth
+from utils.utils import get_auth
 from utils.dataloader import DataLoader, get_symbols_by_names
 import wandb
 from .models import TTCModel
+from utils.constant import INTERVAL
+
 class ModelTrainer:
-    def __init__(self, account = "a1", train_type = "tune", max_sample_size = 1e7):
+    def __init__(self, account = "a1", train_type = "tune", max_sample_size = 1e8):
         print("Initializing Model trainer")
         auth = get_auth(account)
         self.train_type = train_type  # tune or train
@@ -15,15 +17,9 @@ class ModelTrainer:
         self.wandb_name = self.algo_name + "_" + datetime.now().strftime(
             "%Y%m%d_%H-%M-%S") if self.train_type == "train" else False
         self.project_name = "futures-predict-8"
-        INTERVAL = Interval()
-        self.interval = INTERVAL.ONE_MIN
-        self.max_steps = max_step_by_day[self.interval]
-        self.training_iteration = dict({
-            INTERVAL.ONE_MIN: 100,
-            INTERVAL.FIVE_SEC: 400,
-            INTERVAL.ONE_SEC: 500,
-        })
-        self.symbol = get_symbols_by_names(["cotton"])[0]
+        self.interval = INTERVAL.FIVE_SEC
+        self.commodity = "cotton"
+        self.symbol = get_symbols_by_names([self.commodity])[0]
         self.max_sample_size = int(max_sample_size)
     
     def get_training_data(self, start_dt=date(2016, 1, 1), end_dt=date(2022, 1, 1)):
@@ -33,13 +29,14 @@ class ModelTrainer:
         return offline_data
 
     def run(self, is_train=True):
-        model = TTCModel()
+        model = TTCModel(interval=self.interval, commodity_name=self.commodity)
         if is_train:
-            # data = self.get_training_data()
-            data = [np.load("./tmp/X_60_5.npy"), np.load("./tmp/y_60_5.npy")]
-            model.set_training_data(data, 60, 5)
+            data = self.get_training_data()
+            # data = [np.load("./tmp/X_60_5.npy"), np.load("./tmp/y_60_5.npy")]
+            # model.set_training_data(data, 360, 5)
             # model.train()
-            model.tune()
+            # model.tune()
+            model.set_training_data(data, 120, 10)
         else:
             predict_data = self.get_training_data(start_dt=date(2022, 1, 1), end_dt=date(2022, 8, 1))
             X_predict, y = model.set_predict_data(predict_data, 90, 10)
