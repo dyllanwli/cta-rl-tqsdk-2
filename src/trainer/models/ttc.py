@@ -18,7 +18,7 @@ from tqdm import tqdm
 import pytz
 import wandb
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import minmax_scale
 from wandb.keras import WandbCallback
 
 from utils.constant import mlp_units_dict, low_by_label_length, high_by_label_length
@@ -44,7 +44,6 @@ class TTCModel:
         self.X_output_path = "./tmp/X_{}{}_{}_{}.npy".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length)
         self.y_output_path = "./tmp/y_{}{}_{}_{}.npy".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length)
         
-    
     def set_training_data(self, data: pd.DataFrame):
         if isinstance(data, pandas.DataFrame):
             X, y = self.pre_process_data(data)
@@ -72,11 +71,9 @@ class TTCModel:
 
     def timeseries_normalize(self, data: np.ndarray):
         print("Normalizing data")
-        @ray.remote
-        def normalize(subset):
-            scaler = MinMaxScaler(feature_range=(0, 2))
-            return scaler.fit_transform(subset)
-        data = [normalize.remote(subset) for subset in data]
+        normalize = lambda subset: minmax_scale(subset, feature_range=(0, 2), axis=0)
+        for i in tqdm(range(data.shape[0])):
+            data[i] = normalize(data[i])
         return data
     
     def _process_datatime(self, df: pd.DataFrame):
@@ -124,7 +121,7 @@ class TTCModel:
         df['vol'] = df['vol'].apply(lambda x: check_volatility(x))
         print(df["vol"].value_counts())
         df = df[self.train_col_name].dropna()
-        return df._to_pandas()
+        return df
     
     def pre_process_data(self, df: pd.DataFrame):
         # start preprocessing
