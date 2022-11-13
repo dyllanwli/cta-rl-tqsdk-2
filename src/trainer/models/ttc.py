@@ -70,9 +70,9 @@ class TTCModel:
         return X_predict, y
 
     def timeseries_normalize(self, data: np.ndarray):
-        print("Normalizing data")
+        print("Normalizing data", data.shape)
         normalize = lambda subset: minmax_scale(subset, feature_range=(0, 2), axis=0)
-        for i in tqdm(range(data.shape[0])):
+        for i in tqdm(range(data.shape[0]), bar_format="{percentage:.0f}%"):
             data[i] = normalize(data[i])
         return data
     
