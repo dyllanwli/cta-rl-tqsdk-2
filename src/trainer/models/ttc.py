@@ -36,7 +36,7 @@ class TTCModel:
         self.n_classes = 5
         self.train_col_name = ["open", "high", "low", "close", "vol", "open_oi", "close_oi", "is_daytime"]
         self.fit_config = {
-            "batch_size": 512,
+            "batch_size": 256,
             "epochs": 100,
             "validation_split": 0.25,
             "shuffle": True,
@@ -44,7 +44,7 @@ class TTCModel:
         self.X_output_path = "./tmp/X_{}{}_{}_{}.npy".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length)
         self.y_output_path = "./tmp/y_{}{}_{}_{}.npy".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length)
         
-    def set_training_data(self, data: pd.DataFrame):
+    def set_training_data(self, data: pd.DataFrame, debug_mode: bool = False):
         if isinstance(data, pandas.DataFrame):
             X, y = self.pre_process_data(data)
             c = np.array(np.unique(y, return_counts=True)).T
@@ -55,6 +55,9 @@ class TTCModel:
         else:
             X = np.load(self.X_output_path)
             y = np.load(self.y_output_path)
+        if debug_mode:
+            X = X[:10000]
+            y = y[:10000]
         X = self.timeseries_normalize(X)
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=False)
         del X, y
