@@ -15,3 +15,4 @@ pip install autokeras
 pip install -U modin
 pip install pytorch-forecasting
 pip install -q -U keras-tuner
+pip install -U tensorflow
