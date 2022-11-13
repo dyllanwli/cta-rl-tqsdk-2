@@ -32,9 +32,9 @@ class ModelTrainer:
         model = TTCModel(interval=self.interval, commodity_name=self.commodity, max_encode_length=120, max_label_length=10)
         if is_train:
             # data = self.get_training_data()
-            model.set_training_data(None)
+            model.set_training_data(None, debug_mode=True)
             # model.train()
-            model.tune()
+            # model.tune()
         else:
             predict_data = self.get_training_data(start_dt=date(2022, 1, 1), end_dt=date(2022, 8, 1))
             X_predict, y = model.set_predict_data(predict_data)

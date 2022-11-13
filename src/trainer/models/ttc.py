@@ -54,8 +54,8 @@ class TTCModel:
             X = np.load(self.X_output_path)
             y = np.load(self.y_output_path)
         if debug_mode:
-            X = X[:10000]
-            y = y[:10000]
+            X = X[:100000]
+            y = y[:100000]
         
         c = np.array(np.unique(y, return_counts=True)).T
         print("Class distribution: ", c)
@@ -75,10 +75,10 @@ class TTCModel:
 
     def timeseries_normalize(self, data: np.ndarray):
         print("Normalizing data", data.shape)
-        normalize = lambda subset: minmax_scale(subset, feature_range=(0, 2), axis=0)
+        normalize = lambda subset: minmax_scale(subset, axis=0)
         for i in range(data.shape[0]):
             data[i] = normalize(data[i])
-        return data
+        return data 
     
     def _process_datatime(self, df: pd.DataFrame):
         print("Processing datetime")
@@ -247,7 +247,7 @@ class TTCModel:
         """
         Tune hyperparameters
         """
-        wandb.init(project=self.project_name, group="tune")
+        wandb.init(project=self.project_name, group="tune", reinit=True)
         tuner = kt.Hyperband(self.model_builder,
                      objective='sparse_categorical_accuracy',
                      max_epochs=50,
@@ -293,7 +293,7 @@ class TTCModel:
         print("[test loss, test accuracy]:", eval_result)
 
     def train(self):
-        wandb.init(project=self.project_name, group="train")
+        wandb.init(project=self.project_name, group="train", reinit=True)
         model = self.model_builder()
 
         callbacks = [
