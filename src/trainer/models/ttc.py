@@ -47,8 +47,6 @@ class TTCModel:
     def set_training_data(self, data: pd.DataFrame, debug_mode: bool = False):
         if isinstance(data, pandas.DataFrame):
             X, y = self.pre_process_data(data)
-            c = np.array(np.unique(y, return_counts=True)).T
-            print("Class distribution: ", c)
             print("Saving data")
             np.save(self.X_output_path, X)
             np.save(self.y_output_path, y)
@@ -58,6 +56,9 @@ class TTCModel:
         if debug_mode:
             X = X[:10000]
             y = y[:10000]
+        
+        c = np.array(np.unique(y, return_counts=True)).T
+        print("Class distribution: ", c)
         X = self.timeseries_normalize(X)
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=False)
         del X, y
@@ -75,7 +76,7 @@ class TTCModel:
     def timeseries_normalize(self, data: np.ndarray):
         print("Normalizing data", data.shape)
         normalize = lambda subset: minmax_scale(subset, feature_range=(0, 2), axis=0)
-        for i in tqdm(range(data.shape[0]), bar_format="{percentage:.0f}%"):
+        for i in range(data.shape[0]):
             data[i] = normalize(data[i])
         return data
     
