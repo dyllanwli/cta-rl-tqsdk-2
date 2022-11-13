@@ -3,9 +3,11 @@ import logging
 import os 
 logging.getLogger('tensorflow').disabled = True
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+os.environ['__MODIN_AUTOIMPORT_PANDAS__'] = '1' # Fix modin warning 
 
-
-import pandas as pd
+import pandas 
+import modin.pandas as pd
+import ray
 import tensorflow as tf
 from tensorflow import keras
 from keras import layers, Model, models
@@ -19,16 +21,19 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from wandb.keras import WandbCallback
 
-from utils.constant import mlp_units_dict
+from utils.constant import mlp_units_dict, low_by_label_length, high_by_label_length
 
 class TTCModel:
-    def __init__(self):
+    def __init__(self, interval: str, commodity_name: str):
+        ray.init(num_cpus = 62, include_dashboard=False)
         print('GPU name: ', tf.config.list_physical_devices('GPU'))
         self.project_name = "ts_prediction_2"
+        self.interval = interval
+        self.commodity_name = commodity_name
         self.n_classes = 5
         self.train_col_name = ["open", "high", "low", "close", "vol", "open_oi", "close_oi", "is_daytime"]
         self.fit_config = {
-            "batch_size": 128,
+            "batch_size": 512,
             "epochs": 100,
             "validation_split": 0.25,
             "shuffle": True,
@@ -37,24 +42,25 @@ class TTCModel:
     def set_training_data(self, data: pd.DataFrame, max_encode_length: int = 60, max_label_length: int = 5):
         self.max_encode_length = max_encode_length
         self.max_label_length = max_label_length
-        if isinstance(data, pd.DataFrame):
-            X, y = self.pre_process_saving(data)
+        if isinstance(data, pandas.DataFrame):
+            X, y = self.pre_process_data(data)
             c = np.array(np.unique(y, return_counts=True)).T
             print("Class distribution: ", c)
             print("Saving data")
-            np.save("./tmp/X_{}_{}.npy".format(self.max_encode_length, self.max_label_length), X)
-            np.save("./tmp/y_{}_{}.npy".format(self.max_encode_length, self.max_label_length), y)
+            np.save("./tmp/X_{}{}_{}_{}.npy".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length), X)
+            np.save("./tmp/y_{}{}_{}_{}.npy".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length), y)
         else:
             X, y = data
         X = self.timeseries_normalize(X)
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=False)
+        del X, y
         self.input_shape = self.X_train.shape[1:]
     
     def set_predict_data(self, data: pd.DataFrame, max_encode_length: int = 60, max_label_length: int = 5):
         self.max_encode_length = max_encode_length
         self.max_label_length = max_label_length
         print("Set predict data")
-        X_predict, y = self.pre_process_saving(data)
+        X_predict, y = self.pre_process_data(data)
         c = np.array(np.unique(y, return_counts=True)).T
         print("Class distribution: ", c)
         # np.save("./tmp/X_predict.npy", X)
@@ -62,7 +68,7 @@ class TTCModel:
         return X_predict, y
 
     def timeseries_normalize(self, data: np.ndarray):
-        print("Start normalizing data")
+        print("Normalizing data")
         for subset in tqdm(range(data.shape[0])):
             # subset shpae: (self.max_encode_length, 8)
             scaler = MinMaxScaler(feature_range=(0, 2))
@@ -71,85 +77,82 @@ class TTCModel:
         return data
     
     def _process_datatime(self, df: pd.DataFrame):
+        print("Processing datetime")
         exchange_tz = pytz.timezone('Asia/Shanghai')
         df["datetime"] =  df["datetime"].apply(lambda x: datetime.utcfromtimestamp(x.value / 1e9).astimezone(exchange_tz))
-        df["is_daytime"] = df["datetime"].apply(lambda x: x.hour * 60 + x.minute)
+        df["is_daytime"] = df["datetime"].apply(lambda x: x.hour * 3600 + x.minute * 60 + x.second)
         return df
     
-    def pre_process_saving(self, data: pd.DataFrame):
-        def set_volatility_label(df: pd.DataFrame):
-            """
-                check if the price changes by percentage within max_label_length step
-                n_classes = 5
-                label range:
-                    -inf ~ -high | -high ~ -low | -low ~ low | low ~ high | high ~ inf
-                e.g.
-                    -inf ~ -0.01 | -0.01 ~ -0.005 | -0.005 ~ 0.005 | 0.005 ~ 0.01 | 0.01 ~ inf
-            """
-            low_by_label_length = {
-                10: 0.0015, # 0.15%
-                5: 0.00075, # 0.075%
-            }
-            high_by_label_length = {
-                10: 0.003, # 0.3%
-                5: 0.0015, # 0.15%
-            }
-            low = low_by_label_length[self.max_label_length]
-            high = high_by_label_length[self.max_label_length]
+    def set_volatility_label(self, df: pd.DataFrame):
+        """
+            check if the price changes by percentage within max_label_length step
+            n_classes = 5
+            label range:
+                -inf ~ -high | -high ~ -low | -low ~ low | low ~ high | high ~ inf
+            e.g.
+                -inf ~ -0.01 | -0.01 ~ -0.005 | -0.005 ~ 0.005 | 0.005 ~ 0.01 | 0.01 ~ inf
+        """
+        # df = pd.DataFrame(df)
+        low = low_by_label_length[self.interval][self.max_label_length]
+        high = high_by_label_length[self.interval][self.max_label_length]
 
-            # reset the index from 0 to df.shape[0]
-            df = df.reset_index(drop=True).reset_index()
+        # reset the index from 0 to df.shape[0]
+        df = df.reset_index(drop=True).reset_index()
 
-            def check_volatility(row):
-                idx = row["index"]
-                if idx + self.max_label_length >= df.shape[0]:
-                    return np.nan
-                else:
-                    vol = df.iloc[idx + self.max_label_length]['close'] / df.iloc[idx]['close'] - 1
-                    if vol < -high:
-                        return 0
-                    elif -high < vol < -low:
-                        return 1
-                    elif -low < vol < low:
-                        return 2
-                    elif low < vol < high:
-                        return 3
-                    elif high < vol:
-                        return 4
-                    else:
-                        return np.nan
-            
-            df['vol'] = df.apply(lambda row: check_volatility(row), axis=1)
-            return df
+        def check_volatility(v):
+            if v < -high:
+                return 0
+            elif -high < v < -low:
+                return 1
+            elif -low < v < low:
+                return 2
+            elif low < v < high:
+                return 3
+            elif high < v:
+                return 4
+            else:
+                return np.nan
 
-        def pre_process(df: pd.DataFrame):
-            print("Start preprocessing data")
-            df = pd.DataFrame(df)
-            df = self._process_datatime(df)
-            train = []
-            target = []
-            def process_by_group(g) -> pd.DataFrame:        
-                g = set_volatility_label(g)
-                print(g["vol"].value_counts())
-                g = g[self.train_col_name].dropna()
-                target_list = []
-                train_list = []
-                for i in tqdm(range(g.shape[0] - self.max_encode_length)):
-                    # yield training, target 
-                    train, target = g.iloc[i:i+self.max_encode_length].to_numpy(dtype=np.float32), g.iloc[i+self.max_encode_length]["vol"]
-                    train_list.append(train)
-                    target_list.append(target)
-                return train_list, target_list 
-            print("Start processing group")
-            for g_name, g in df.groupby("underlying_symbol"):
-                print("Processing group: ", g_name)
-                x, y = process_by_group(g)
-                train += x
-                target += y
-            print("Preprocess data done.")
-            return np.array(train), np.array(target)
+        numerator = df['close'].to_numpy()[self.max_label_length:]
+        denominator = df['close'].to_numpy()[:-self.max_label_length]
+        vol = numerator / denominator - 1
+        df = df.iloc[:-self.max_label_length]
+        df['vol'] = vol
+        df['vol'] = df['vol'].apply(lambda x: check_volatility(x))
+        print(df["vol"].value_counts())
+        df = df[self.train_col_name].dropna()
+        return df._to_pandas()
+    
+    def pre_process_data(self, df: pd.DataFrame):
         # start preprocessing
-        return pre_process(data)
+
+        def process_by_group(g) -> pd.DataFrame:    
+            print("Setting volatility label")    
+            g = self.set_volatility_label(g)
+            target_list = []
+            train_list = []
+            for i in tqdm(range(g.shape[0] - self.max_encode_length)):
+                # yield training, target 
+                train, target = g.iloc[i:i+self.max_encode_length].to_numpy(dtype=np.float32), g.iloc[i+self.max_encode_length]["vol"]
+                train_list.append(train)
+                target_list.append(target)
+            return train_list, target_list
+
+        print("Start preprocessing data")
+        df = pd.DataFrame(df)
+        df = self._process_datatime(df)
+        train = []
+        target = []
+
+        print("Processing group")
+        for g_name, g in df.groupby("underlying_symbol"):
+            print("Processing group: ", g_name)
+            x, y = process_by_group(g)
+            train += x
+            target += y
+
+        print("Preprocess data done.")
+        return np.array(train), np.array(target)
 
     def build_model(
         self,
@@ -161,22 +164,27 @@ class TTCModel:
         mlp_units: list,
         dropout=0,
         mlp_dropout=0,
+        lstm_units: int = 0,
         hp = False,
     ) -> Model:
         if hp:
             # hyperparameter tuning
-            head_size = hp.Int("head_size", min_value=128, max_value=512, step=64)
+            # head_size = hp.Choice("head_size", values=[128, 256, 512, 1024], default=128)
             num_heads = hp.Int("num_heads", min_value=1, max_value=6, step=1)
             ff_dim = hp.Int("ff_dim", min_value=2, max_value=8, step=1)
-            mlp_dropout = hp.Float("mlp_dropout", min_value=0.1, max_value=0.5, step=0.1)
+            mlp_dropout = hp.Float("mlp_dropout", min_value=0.2, max_value=0.4, step=0.1)
             dropout = hp.Float("dropout", min_value=0.2, max_value=0.4, step=0.05)
             num_transformer_blocks = hp.Int("num_transformer_blocks", min_value=3, max_value=8, step=1)
             mlp_units_key = hp.Choice("mlp_units", values=[0,1,2,3,4,5,6,7], default=0)
             mlp_units = mlp_units_dict[mlp_units_key]
+            lstm_units = hp.Choice("lstm_units", values=[0, 128, 256], default=0)
         inputs = keras.Input(shape=input_shape)
         x = inputs
         for _ in range(num_transformer_blocks):
             x = self.transformer_encoder(x, head_size, num_heads, ff_dim, dropout)
+        
+        if lstm_units != 0:
+            x = layers.LSTM(128, return_sequences=True)(x)
 
         x = layers.GlobalAveragePooling1D(data_format="channels_first")(x)
         for dim in mlp_units:
@@ -210,13 +218,14 @@ class TTCModel:
         """
         model = self.build_model(
             self.input_shape,
-            head_size=256,
+            head_size=512,
             num_heads=4,
             ff_dim=4,
             num_transformer_blocks=6,
             mlp_units=[256, 128],
             mlp_dropout=0.3,
             dropout=0.3,
+            lstm_units=0,
             hp = hp,
         )
 
@@ -250,8 +259,8 @@ class TTCModel:
         print("Start tuning")
 
         tuner.search(self.X_train, self.y_train, 
-            epochs=200, validation_split=0.2, 
-            callbacks=callbacks, shuffle=True, batch_size=128)
+            epochs=500, validation_split=self.fit_config["validation_split"],
+            callbacks=callbacks, shuffle=True, batch_size=self.fit_config["batch_size"])
 
         best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
         best_hps_config = best_hps.get_config()['values']

@@ -1,3 +1,5 @@
+
+from utils.utils import Interval
 mlp_units_dict = {
     0: [128],
     1: [256],
@@ -7,4 +9,27 @@ mlp_units_dict = {
     5: [512, 256],
     6: [128, 64, 32],
     7: [256, 128, 64],
+}
+
+INTERVAL = Interval()
+
+low_by_label_length = {
+    INTERVAL.FIVE_SEC: {
+        5: 0.0001, # 0.01%
+        10: 0.0002, # 0.02%
+    }, 
+    INTERVAL.ONE_MIN: {
+        10: 0.0015, # 0.15%
+        5: 0.00075, # 0.075%
+    }
+}
+high_by_label_length = {
+    INTERVAL.FIVE_SEC: {
+        5: 0.0005, # 0.05% 0.02% is the minimum for this interval
+        10: 0.00075, # 0.075%
+    },
+    INTERVAL.ONE_MIN: {
+        10: 0.003, # 0.3%
+        5: 0.0015, # 0.15%
+    }
 }
