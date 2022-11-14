@@ -173,7 +173,7 @@ class TTCModel:
     ) -> Model:
         if hp:
             # hyperparameter tuning
-            # head_size = hp.Choice("head_size", values=[128, 256, 512, 1024], default=128)
+            head_size = hp.Choice("head_size", values=[128, 256, 512, 1024], default=128)
             num_heads = hp.Int("num_heads", min_value=1, max_value=6, step=1)
             ff_dim = hp.Int("ff_dim", min_value=2, max_value=8, step=1)
             mlp_dropout = hp.Float("mlp_dropout", min_value=0.2, max_value=0.4, step=0.1)

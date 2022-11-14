@@ -31,8 +31,8 @@ class ModelTrainer:
     def run(self, is_train=True):
         model = TTCModel(interval=self.interval, commodity_name=self.commodity, max_encode_length=120, max_label_length=1)
         if is_train:
-            data = self.get_training_data()
-            model.set_training_data(data)
+            # data = self.get_training_data()
+            model.set_training_data(None)
             # model.train()
             model.tune()
         else:
