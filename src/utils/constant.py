@@ -21,6 +21,7 @@ low_by_label_length = {
     INTERVAL.ONE_MIN: {
         10: 0.0015, # 0.15%
         5: 0.00075, # 0.075%
+        1: 0.00025, # 0.025%
     }
 }
 high_by_label_length = {
@@ -31,5 +32,6 @@ high_by_label_length = {
     INTERVAL.ONE_MIN: {
         10: 0.003, # 0.3%
         5: 0.0015, # 0.15%
+        1: 0.0005, # 0.05%
     }
 }
