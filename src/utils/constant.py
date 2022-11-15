@@ -24,6 +24,7 @@ low_by_label_length = {
         1: 0.00025, # 0.025%
     }
 }
+
 high_by_label_length = {
     INTERVAL.FIVE_SEC: {
         5: 0.0005, # 0.05% 0.02% is the minimum for this interval

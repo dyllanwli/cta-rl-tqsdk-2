@@ -17,7 +17,7 @@ class ModelTrainer:
         self.wandb_name = self.algo_name + "_" + datetime.now().strftime(
             "%Y%m%d_%H-%M-%S") if self.train_type == "train" else False
         self.project_name = "futures-predict-8"
-        self.interval = INTERVAL.FIVE_SEC
+        self.interval = INTERVAL.ONE_MIN
         self.commodity = "cotton"
         self.symbol = get_symbols_by_names([self.commodity])[0]
         self.max_sample_size = int(max_sample_size)
@@ -29,13 +29,13 @@ class ModelTrainer:
         return offline_data
 
     def run(self, is_train=True):
-        model = TTCModel(interval=self.interval, commodity_name=self.commodity, max_encode_length=120, max_label_length=10)
+        model = TTCModel(interval=self.interval, commodity_name=self.commodity, max_encode_length=120, max_label_length=1)
         if is_train:
-            data = self.get_training_data()
-            # data = None
+            # data = self.get_training_data()
+            data = None
             model.set_training_data(data)
-            # model.train()
-            # model.tune(search_data_ratio=0.3)
+            model.train()
+            # model.tune(search_data_ratio=0.8)
         else:
             predict_data = self.get_training_data(start_dt=date(2022, 1, 1), end_dt=date(2022, 8, 1))
             X_predict, y = model.set_predict_data(predict_data)

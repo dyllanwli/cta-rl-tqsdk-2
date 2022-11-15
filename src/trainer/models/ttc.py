@@ -41,8 +41,19 @@ class TTCModel:
             "validation_split": 0.3,
             "shuffle": True,
         }
-        self.X_output_path = "./tmp/X_{}{}_{}_{}.npy".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length)
-        self.y_output_path = "./tmp/y_{}{}_{}_{}.npy".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length)
+        self.datatype_name = "{}{}_{}_{}".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length)
+        self.X_output_path = "./tmp/X_"+self.datatype_name+".npy"
+        self.y_output_path = "./tmp/y_"+self.datatype_name+".npy"
+    
+    def _set_classes(self, y: np.ndarray):
+        """
+        Set the classes for the model
+        """
+        c = np.array(np.unique(y, return_counts=True)).T
+        print("Class distribution: ", c)
+        self.n_classes = len(c)
+        # print precents
+        print("Class distribution: ", c[:, 1] / c[:, 1].sum())
         
     def set_training_data(self, data: pd.DataFrame, debug_mode: bool = False):
         if isinstance(data, pandas.DataFrame):
@@ -57,9 +68,7 @@ class TTCModel:
             X = X[:100000]
             y = y[:100000]
         
-        c = np.array(np.unique(y, return_counts=True)).T
-        print("Class distribution: ", c)
-        self.n_classes = len(c)
+        self._set_classes(y)
         # X = self.timeseries_normalize(X)
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=False)
         del X, y
@@ -68,9 +77,7 @@ class TTCModel:
     def set_predict_data(self, data: pd.DataFrame):
         print("Set predict data")
         X_predict, y = self.pre_process_data(data)
-        c = np.array(np.unique(y, return_counts=True)).T
-        print("Class distribution: ", c)
-        self.n_classes = len(c)
+        self._set_classes(y)
         # np.save("./tmp/X_predict.npy", X)
         # np.save("./tmp/y_predict.npy", y)
         return X_predict, y
@@ -120,11 +127,11 @@ class TTCModel:
                     return np.nan
         elif self.n_classes == 3:
             def check_volatility(v):
-                if v < -high:
+                if v < -low:
                     return 0
-                elif -high < v < high:
+                elif -low < v < low:
                     return 1
-                elif high < v:
+                elif low < v:
                     return 2
                 else:
                     return np.nan
@@ -245,13 +252,13 @@ class TTCModel:
             self.input_shape,
             head_size=512,
             num_heads=4,
-            ff_dim=4,
-            num_transformer_blocks=6,
-            mlp_units=[256, 128],
+            ff_dim=128,
+            num_transformer_blocks=5,
+            mlp_units=[128],
             mlp_dropout=0.3,
             dropout=0.3,
             lstm_units=0,
-            feed_forward_type="cnn",
+            feed_forward_type="mlp",
             hp = hp,
         )
 
@@ -273,7 +280,7 @@ class TTCModel:
         """
         Tune hyperparameters
         """
-        wandb.init(project=self.project_name, group="tune", reinit=True, settings=wandb.Settings(start_method="fork"))
+        wandb.init(project=self.project_name, group="tune", reinit=True, settings=wandb.Settings(start_method="fork"), name=self.datatype_name)
         tuner = kt.Hyperband(self.model_builder,
                      objective='sparse_categorical_accuracy',
                      max_epochs=50,
@@ -290,7 +297,7 @@ class TTCModel:
         tuner.search(
             self.X_train[:int(len(self.X_train)*search_data_ratio)],
             self.y_train[:int(len(self.y_train)*search_data_ratio)], 
-            epochs=500, validation_split=self.fit_config["validation_split"],
+            epochs=300, validation_split=self.fit_config["validation_split"],
             callbacks=callbacks, shuffle=True, batch_size=self.fit_config["batch_size"])
 
         best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
@@ -319,7 +326,7 @@ class TTCModel:
         print("[test loss, test accuracy]:", eval_result)
 
     def train(self):
-        wandb.init(project=self.project_name, group="train", reinit=True, settings=wandb.Settings(start_method="fork"))
+        wandb.init(project=self.project_name, group="train", reinit=True, settings=wandb.Settings(start_method="fork"), name = self.datatype_name)
         model = self.model_builder()
 
         callbacks = [
@@ -359,4 +366,3 @@ class TTCModel:
             # print(predict, close_price, y)
             break
         print(predict)
-
