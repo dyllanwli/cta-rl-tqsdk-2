@@ -33,12 +33,12 @@ class TTCModel:
         self.max_encode_length = max_encode_length
         self.max_label_length = max_label_length
 
-        self.n_classes = 5
+        self.n_classes = 3
         self.train_col_name = ["open", "high", "low", "close", "vol", "open_oi", "close_oi", "is_daytime"]
         self.fit_config = {
             "batch_size": 256,
             "epochs": 100,
-            "validation_split": 0.25,
+            "validation_split": 0.3,
             "shuffle": True,
         }
         self.X_output_path = "./tmp/X_{}{}_{}_{}.npy".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length)
@@ -137,7 +137,7 @@ class TTCModel:
         df['vol'] = df['vol'].apply(lambda x: check_volatility(x))
         print(df["vol"].value_counts())
         df = df[self.train_col_name].dropna()
-        return df
+        return df._to_pandas()
     
     def pre_process_data(self, df: pd.DataFrame):
         # start preprocessing
@@ -186,7 +186,7 @@ class TTCModel:
     ) -> Model:
         if hp:
             # hyperparameter tuning
-            head_size = hp.Choice("head_size", values=[128, 256, 512, 1024], default=128)
+            head_size = hp.Choice("head_size", values=[128, 256, 512], default=128)
             num_heads = hp.Int("num_heads", min_value=1, max_value=6, step=1)
             ff_dim = hp.Choice("ff_dim", values=[4, 8, 16, 32, 128, 256, 512], default=128)
             mlp_dropout = hp.Float("mlp_dropout", min_value=0.2, max_value=0.4, step=0.1)
