@@ -29,13 +29,13 @@ class ModelTrainer:
         return offline_data
 
     def run(self, is_train=True):
-        model = TTCModel(interval=self.interval, commodity_name=self.commodity, max_encode_length=120, max_label_length=5)
+        model = TTCModel(interval=self.interval, commodity_name=self.commodity, max_encode_length=120, max_label_length=10)
         if is_train:
-            # data = self.get_training_data()
-            data = None
+            data = self.get_training_data()
+            # data = None
             model.set_training_data(data)
             # model.train()
-            model.tune(search_data_ratio=0.3)
+            # model.tune(search_data_ratio=0.3)
         else:
             predict_data = self.get_training_data(start_dt=date(2022, 1, 1), end_dt=date(2022, 8, 1))
             X_predict, y = model.set_predict_data(predict_data)
