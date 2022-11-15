@@ -25,7 +25,7 @@ from utils.constant import mlp_units_dict, low_by_label_length, high_by_label_le
 
 class TTCModel:
     def __init__(self, interval: str, commodity_name: str, max_encode_length: int = 60, max_label_length: int = 5):
-        ray.init(num_cpus = 62, include_dashboard=False)
+        ray.init(include_dashboard=False)
         print('GPU name: ', tf.config.list_physical_devices('GPU'))
         self.project_name = "ts_prediction_2"
         self.commodity_name = commodity_name
@@ -273,7 +273,7 @@ class TTCModel:
         """
         Tune hyperparameters
         """
-        wandb.init(project=self.project_name, group="tune", reinit=True)
+        wandb.init(project=self.project_name, group="tune", reinit=True, settings=wandb.Settings(start_method="fork"))
         tuner = kt.Hyperband(self.model_builder,
                      objective='sparse_categorical_accuracy',
                      max_epochs=50,
@@ -319,7 +319,7 @@ class TTCModel:
         print("[test loss, test accuracy]:", eval_result)
 
     def train(self):
-        wandb.init(project=self.project_name, group="train", reinit=True)
+        wandb.init(project=self.project_name, group="train", reinit=True, settings=wandb.Settings(start_method="fork"))
         model = self.model_builder()
 
         callbacks = [
@@ -346,7 +346,6 @@ class TTCModel:
     def predict(self, model, X_predict, y):
         if isinstance(model, str):
             model: Model = models.load_model(model)
-        # wandb.init(project=self.project_name, group="predict")
 
         # X_predict_norm = self.timeseries_normalize(X_predict)
 
