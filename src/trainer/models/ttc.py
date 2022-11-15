@@ -36,7 +36,7 @@ class TTCModel:
         self.n_classes = 3
         self.train_col_name = ["open", "high", "low", "close", "vol", "open_oi", "close_oi", "is_daytime"]
         self.fit_config = {
-            "batch_size": 256,
+            "batch_size": 512,
             "epochs": 100,
             "validation_split": 0.3,
             "shuffle": True,
@@ -340,8 +340,7 @@ class TTCModel:
             validation_split=self.fit_config["validation_split"],
             epochs=self.fit_config["epochs"],
             batch_size=self.fit_config["batch_size"],
-            shuffle=self.fit_config["shuffle"], 
-            use_multiprocessing=self.fit_config["use_multiprocessing"],
+            shuffle=self.fit_config["shuffle"],
             callbacks=callbacks,
         )
 
