@@ -2,6 +2,7 @@
 config.yaml
 *.npy
 *.h5
+rsync_faster.sh
 
 # log
 wandb/

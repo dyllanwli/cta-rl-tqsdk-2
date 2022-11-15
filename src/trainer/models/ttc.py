@@ -59,7 +59,8 @@ class TTCModel:
         
         c = np.array(np.unique(y, return_counts=True)).T
         print("Class distribution: ", c)
-        X = self.timeseries_normalize(X)
+        self.n_classes = len(c)
+        # X = self.timeseries_normalize(X)
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=False)
         del X, y
         self.input_shape = self.X_train.shape[1:]
@@ -69,6 +70,7 @@ class TTCModel:
         X_predict, y = self.pre_process_data(data)
         c = np.array(np.unique(y, return_counts=True)).T
         print("Class distribution: ", c)
+        self.n_classes = len(c)
         # np.save("./tmp/X_predict.npy", X)
         # np.save("./tmp/y_predict.npy", y)
         return X_predict, y
@@ -102,20 +104,30 @@ class TTCModel:
 
         # reset the index from 0 to df.shape[0]
         df = df.reset_index(drop=True).reset_index()
-
-        def check_volatility(v):
-            if v < -high:
-                return 0
-            elif -high < v < -low:
-                return 1
-            elif -low < v < low:
-                return 2
-            elif low < v < high:
-                return 3
-            elif high < v:
-                return 4
-            else:
-                return np.nan
+        if self.n_classes == 5:
+            def check_volatility(v):
+                if v < -high:
+                    return 0
+                elif -high < v < -low:
+                    return 1
+                elif -low < v < low:
+                    return 2
+                elif low < v < high:
+                    return 3
+                elif high < v:
+                    return 4
+                else:
+                    return np.nan
+        elif self.n_classes == 3:
+            def check_volatility(v):
+                if v < -high:
+                    return 0
+                elif -high < v < high:
+                    return 1
+                elif high < v:
+                    return 2
+                else:
+                    return np.nan
 
         numerator = df['close'].to_numpy()[self.max_label_length:]
         denominator = df['close'].to_numpy()[:-self.max_label_length]
@@ -169,23 +181,26 @@ class TTCModel:
         dropout=0,
         mlp_dropout=0,
         lstm_units: int = 0,
+        feed_forward_type: str = "cnn",
         hp = False,
     ) -> Model:
         if hp:
             # hyperparameter tuning
             head_size = hp.Choice("head_size", values=[128, 256, 512, 1024], default=128)
             num_heads = hp.Int("num_heads", min_value=1, max_value=6, step=1)
-            ff_dim = hp.Int("ff_dim", min_value=2, max_value=8, step=1)
+            ff_dim = hp.Choice("ff_dim", values=[4, 8, 16, 32, 128, 256, 512], default=128)
             mlp_dropout = hp.Float("mlp_dropout", min_value=0.2, max_value=0.4, step=0.1)
             dropout = hp.Float("dropout", min_value=0.2, max_value=0.4, step=0.05)
             num_transformer_blocks = hp.Int("num_transformer_blocks", min_value=3, max_value=8, step=1)
-            mlp_units_key = hp.Choice("mlp_units", values=[0,1,2,3,4,5,6,7], default=0)
-            mlp_units = mlp_units_dict[mlp_units_key]
+            # mlp_units_key = hp.Choice("mlp_units", values=[64, 128, 256, 512], default=128)
+            # mlp_units = mlp_units_dict[mlp_units_key]
             lstm_units = hp.Choice("lstm_units", values=[0, 128, 256], default=0)
+            feed_forward_type = hp.Choice("feed_forward_type", values=["cnn", "mlp"], default="cnn")
         inputs = keras.Input(shape=input_shape)
         x = inputs
+        x = layers.BatchNormalization(epsilon=1e-6)(x)
         for _ in range(num_transformer_blocks):
-            x = self.transformer_encoder(x, head_size, num_heads, ff_dim, dropout)
+            x = self.transformer_encoder(x, head_size, num_heads, ff_dim, dropout, feed_forward_type)
         
         if lstm_units != 0:
             x = layers.LSTM(128, return_sequences=True)(x)
@@ -197,7 +212,7 @@ class TTCModel:
         outputs = layers.Dense(self.n_classes, activation="softmax")(x)
         return Model(inputs, outputs)
 
-    def transformer_encoder(self, inputs, head_size, num_heads, ff_dim, dropout=0):
+    def transformer_encoder(self, inputs, head_size, num_heads, ff_dim, dropout=0, feed_forward_type="cnn"):
         """
         Create a single transformer encoder block.
         """
@@ -210,10 +225,16 @@ class TTCModel:
         res = x + inputs
 
         # Feed Forward Part
-        x = layers.LayerNormalization(epsilon=1e-6)(res)
-        x = layers.Conv1D(filters=ff_dim, kernel_size=1, activation="relu")(x)
-        x = layers.Dropout(dropout)(x)
-        x = layers.Conv1D(filters=inputs.shape[-1], kernel_size=1)(x)
+        if feed_forward_type == "cnn":
+            x = layers.LayerNormalization(epsilon=1e-6)(res)
+            x = layers.Conv1D(filters=ff_dim, kernel_size=1, activation="relu")(x)
+            x = layers.Dropout(dropout)(x)
+            x = layers.Conv1D(filters=inputs.shape[-1], kernel_size=1)(x)
+        elif feed_forward_type == "mlp":
+            x = layers.LayerNormalization(epsilon=1e-6)(res)
+            x = layers.Dense(ff_dim, activation="relu")(x)
+            x = layers.Dropout(dropout)(x)
+            x = layers.Dense(inputs.shape[-1])(x)
         return x + res
     
     def model_builder(self, hp = False) -> Model:
@@ -230,10 +251,15 @@ class TTCModel:
             mlp_dropout=0.3,
             dropout=0.3,
             lstm_units=0,
+            feed_forward_type="cnn",
             hp = hp,
         )
 
-        lr = 1e-4
+        lr = keras.optimizers.schedules.ExponentialDecay(
+            initial_learning_rate=1e-3,
+            decay_steps=10000,
+            decay_rate=0.9,
+        )
 
         model.compile(
             loss="sparse_categorical_crossentropy",
@@ -253,7 +279,7 @@ class TTCModel:
                      max_epochs=50,
                      factor=3,
                      directory='keras_tuner',
-                     project_name='ttc_tuner_{}_{}_{}_{}'.format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length))
+                     project_name='ttc_tuner_{}_{}_{}_{}_n{}'.format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length, self.n_classes))
 
         callbacks = [
             keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True, monitor="val_loss"), 
@@ -322,13 +348,13 @@ class TTCModel:
             model: Model = models.load_model(model)
         # wandb.init(project=self.project_name, group="predict")
 
-        X_predict_norm = self.timeseries_normalize(X_predict)
+        # X_predict_norm = self.timeseries_normalize(X_predict)
 
-        eval_result = model.evaluate(X_predict_norm, y)
+        eval_result = model.evaluate(X_predict, y)
         print("[predict loss, predict accuracy]:", eval_result)
 
-        print("X_predict_norm shape: ", X_predict_norm.shape)
-        for x in X_predict_norm:
+        print("X_predict shape: ", X_predict.shape)
+        for x in X_predict:
             predict = model(np.array([x]), training=False)
             # close_price = X_predict[i, -1, 3]
             # print(predict, close_price, y)
