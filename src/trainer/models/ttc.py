@@ -200,7 +200,7 @@ class TTCModel:
             dropout = hp.Float("dropout", min_value=0.2, max_value=0.4, step=0.05)
             num_transformer_blocks = hp.Int("num_transformer_blocks", min_value=3, max_value=8, step=1)
             # mlp_units_key = hp.Choice("mlp_units", values=[64, 128, 256, 512], default=128)
-            mlp_units = hp.Choice("mlp_units", values=[64, 128, 256], default=128)
+            # mlp_units = hp.Choice("mlp_units", values=[64, 128, 256], default=128)
             lstm_units = hp.Choice("lstm_units", values=[0, 128, 256], default=0)
             feed_forward_type = hp.Choice("feed_forward_type", values=["cnn", "mlp"], default="cnn")
         inputs = keras.Input(shape=input_shape)
@@ -253,8 +253,8 @@ class TTCModel:
             head_size=512,
             num_heads=4,
             ff_dim=128,
-            num_transformer_blocks=5,
-            mlp_units=[128],
+            num_transformer_blocks=4,
+            mlp_units=[256, 128],
             mlp_dropout=0.3,
             dropout=0.3,
             lstm_units=0,
