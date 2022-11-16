@@ -200,7 +200,7 @@ class TTCModel:
             dropout = hp.Float("dropout", min_value=0.2, max_value=0.4, step=0.05)
             num_transformer_blocks = hp.Int("num_transformer_blocks", min_value=3, max_value=8, step=1)
             # mlp_units_key = hp.Choice("mlp_units", values=[64, 128, 256, 512], default=128)
-            # mlp_units = mlp_units_dict[mlp_units_key]
+            mlp_units = hp.Choice("mlp_units", values=[64, 128, 256], default=128)
             lstm_units = hp.Choice("lstm_units", values=[0, 128, 256], default=0)
             feed_forward_type = hp.Choice("feed_forward_type", values=["cnn", "mlp"], default="cnn")
         inputs = keras.Input(shape=input_shape)
@@ -283,7 +283,7 @@ class TTCModel:
         wandb.init(project=self.project_name, group="tune", reinit=True, settings=wandb.Settings(start_method="fork"), name=self.datatype_name)
         tuner = kt.Hyperband(self.model_builder,
                      objective='sparse_categorical_accuracy',
-                     max_epochs=50,
+                     max_epochs=10,
                      factor=3,
                      directory='keras_tuner',
                      project_name='ttc_tuner_{}_{}_{}_{}_n{}'.format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length, self.n_classes))
@@ -297,7 +297,7 @@ class TTCModel:
         tuner.search(
             self.X_train[:int(len(self.X_train)*search_data_ratio)],
             self.y_train[:int(len(self.y_train)*search_data_ratio)], 
-            epochs=300, validation_split=self.fit_config["validation_split"],
+            epochs=100, validation_split=self.fit_config["validation_split"],
             callbacks=callbacks, shuffle=True, batch_size=self.fit_config["batch_size"])
 
         best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
