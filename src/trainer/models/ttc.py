@@ -33,7 +33,7 @@ class TTCModel:
         self.max_label_length = max_label_length
 
         self.n_classes = 3
-        self.train_col_name = ["open", "high", "low", "close", "vol", "open_oi", "close_oi", "is_daytime", "label"] # add moving average will change this
+        self.train_col_name = ["open", "high", "low", "close", "volume", "open_oi", "close_oi", "is_daytime", "label"] # add moving average will change this
         self.fit_config = {
             "batch_size": 512,
             "epochs": 100,
@@ -48,10 +48,8 @@ class TTCModel:
         Set the classes for the model
         """
         c = np.array(np.unique(y, return_counts=True)).T
-        print("Class distribution: ", c)
+        print("Class distribution: ", c, c[:, 1] / c[:, 1].sum())
         self.n_classes = len(c)
-        # print precents
-        print("Class distribution: ", c[:, 1] / c[:, 1].sum())
     
     def _add_moving_average(self, df: pd.DataFrame, windows = [5, 10, 20, 30, 60]) -> pd.DataFrame:
         print("Adding moving average")
@@ -71,6 +69,7 @@ class TTCModel:
             df = process_prev_close_spread(df)
         df = set_volatility_label(df, self.max_label_length, self.n_classes, self.interval)
         df = self._add_moving_average(df)
+        print(df.shape)
         df = df.dropna(subset=self.train_col_name)
 
         if data["secondary"] != None:
@@ -87,6 +86,7 @@ class TTCModel:
         else:
             data = pd.read_csv(self.data_output_path)
 
+        print("Set training data", self.train_col_name)
         X, y = data[self.train_col_name].to_numpy(), data["label"].to_numpy()
         if debug_mode:
             X = X[:100000]

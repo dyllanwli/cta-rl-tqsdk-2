@@ -25,7 +25,7 @@ class ModelTrainer:
         self.symbol = get_symbols_by_names([self.commodity])[0]
         self.max_sample_size = int(max_sample_size)
     
-    def get_training_data(self, start_dt=date(2021, 12, 1), end_dt=date(2022, 1, 1)):
+    def get_training_data(self, start_dt=date(2016, 1, 1), end_dt=date(2022, 1, 1)):
         dataloader = DataLoader(start_dt=start_dt, end_dt=end_dt)
         data = dict(
             primary=dataloader.get_offline_data(
@@ -36,7 +36,7 @@ class ModelTrainer:
         return data
 
     def run(self, is_train=True):
-        model = TTCModel(interval=self.interval, commodity_name=self.commodity, max_encode_length=120, max_label_length=10)
+        model = TTCModel(interval=self.intervals["primary"], commodity_name=self.commodity, max_encode_length=120, max_label_length=10)
         if is_train:
             data = self.get_training_data()
             # data = None

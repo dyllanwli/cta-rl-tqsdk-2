@@ -16,7 +16,7 @@ def process_prev_close_spread(df: pd.DataFrame) -> pd.DataFrame:
     underlying_symbols = df["underlying_symbol"].unique()
     prev_close_spread_price = 0
     sorted_underlying_symbols = sorted(underlying_symbols, key=lambda x: df[df["underlying_symbol"] == x].iloc[0]["datetime"])
-    new_df = pd.DataFrame()
+    new_df = pd.DataFrame(columns=df.columns)
     for symbol in tqdm(sorted_underlying_symbols):
         tmp_df = df[df["underlying_symbol"] == symbol]
         if prev_close_spread_price == 0:
@@ -25,8 +25,9 @@ def process_prev_close_spread(df: pd.DataFrame) -> pd.DataFrame:
         else:
             # Get price spread by diff of close price
             prev_close_spread_price -= tmp_df.iloc[-1]["close"]
+            # print(prev_close_spread_price)
             tmp_df[price_cols] += prev_close_spread_price
-        pd.concat([new_df, tmp_df])
+        new_df = pd.concat([new_df, tmp_df])
     print("Processing prev close spread time:", time.time() - start)
     del df
     return new_df
@@ -77,16 +78,19 @@ def set_volatility_label(df: pd.DataFrame, max_label_length, n_classes, interval
     df = df.iloc[:-max_label_length]
     df['label'] = vol
     df['label'] = df['label'].apply(lambda x: check_volatility(x))
-    print(df["label"].value_counts())
-    print("Class distribution: ", df["label"].value_counts() / df.shape[0])
+    # print(df["label"].value_counts())
+    # print("Class distribution: ", df["label"].value_counts() / df.shape[0])
     return df
 
     
-def process_datatime(self, df: pd.DataFrame):
+def process_datatime(df: pd.DataFrame):
     print("Processing datetime")
+    start = time.time()
     exchange_tz = pytz.timezone('Asia/Shanghai')
     df["datetime"] =  df["datetime"].apply(lambda x: datetime.utcfromtimestamp(x.value / 1e9).astimezone(exchange_tz))
     df["is_daytime"] = df["datetime"].apply(lambda x: x.hour * 3600 + x.minute * 60 + x.second)
+    end = time.time()
+    print("Processing datetime time:", end - start)
     return df
 
 

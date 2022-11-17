@@ -1,6 +1,7 @@
 # config & models
 config.yaml
 *.npy
+*.csv
 *.h5
 rsync_faster.sh
 
