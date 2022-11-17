@@ -248,17 +248,34 @@ class TTCModel:
         """
         Build the model with hyperparameters
         """
+        model_config = dict(
+            input_shape = self.input_shape,
+            head_size = 512,
+            num_heads = 4,
+            ff_dim = 8,
+            num_transformer_blocks = 4,
+            mlp_units = [256, 128],
+            dropout = 0.3,
+            mlp_dropout = 0.3,
+            lstm_units = 128,
+            feed_forward_type = "cnn",
+        )
+
+        if hp == False:
+            # update config if not hyperparameter tuning
+            wandb.config.update(model_config)
+
         model = self.build_model(
-            self.input_shape,
-            head_size=512,
-            num_heads=4,
-            ff_dim=8,
-            num_transformer_blocks=4,
-            mlp_units=[256, 128],
-            mlp_dropout=0.3,
-            dropout=0.3,
-            lstm_units=128,
-            feed_forward_type="cnn",
+            input_shape = model_config["input_shape"],
+            head_size = model_config["head_size"],
+            num_heads = model_config["num_heads"],
+            ff_dim = model_config["ff_dim"],
+            num_transformer_blocks = model_config["num_transformer_blocks"],
+            mlp_units = model_config["mlp_units"],
+            dropout = model_config["dropout"],
+            mlp_dropout = model_config["mlp_dropout"],
+            lstm_units = model_config["lstm_units"],
+            feed_forward_type = model_config["feed_forward_type"],
             hp = hp,
         )
 
@@ -328,8 +345,8 @@ class TTCModel:
     def train(self):
         wandb.init(project=self.project_name, group="train", reinit=True, settings=wandb.Settings(start_method="fork"), name = self.datatype_name)
         model = self.model_builder()
-        wandb.config.update(model.get_config())
-        
+        wandb.config.update()
+
         callbacks = [
             keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True), 
             WandbCallback(save_model=True, monitor="sparse_categorical_accuracy", mode="max")
