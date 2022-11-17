@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1                  
 #SBATCH --cpus-per-task=32          
 #SBATCH --mem=128G                   
-#SBATCH --output=%j.train.log
+#SBATCH --output=./logs/%j.train.log
 #SBATCH --partition=gpu              
 #SBATCH --gres=gpu:a100:1           
 
