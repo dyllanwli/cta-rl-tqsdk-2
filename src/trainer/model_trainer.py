@@ -34,8 +34,8 @@ class ModelTrainer:
             # data = self.get_training_data()
             data = None
             model.set_training_data(data)
-            # model.train()
-            model.tune(search_data_ratio=0.5)
+            model.train()
+            # model.tune(search_data_ratio=0.5)
         else:
             predict_data = self.get_training_data(start_dt=date(2022, 1, 1), end_dt=date(2022, 8, 1))
             X_predict, y = model.set_predict_data(predict_data)
