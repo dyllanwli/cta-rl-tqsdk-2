@@ -328,7 +328,8 @@ class TTCModel:
     def train(self):
         wandb.init(project=self.project_name, group="train", reinit=True, settings=wandb.Settings(start_method="fork"), name = self.datatype_name)
         model = self.model_builder()
-
+        wandb.config.update(model.get_config())
+        
         callbacks = [
             keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True), 
             WandbCallback(save_model=True, monitor="sparse_categorical_accuracy", mode="max")
