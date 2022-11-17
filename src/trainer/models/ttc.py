@@ -210,7 +210,7 @@ class TTCModel:
             x = self.transformer_encoder(x, head_size, num_heads, ff_dim, dropout, feed_forward_type)
         
         if lstm_units != 0:
-            x = layers.LSTM(128, return_sequences=True)(x)
+            x = layers.LSTM(lstm_units, return_sequences=True)(x)
 
         x = layers.GlobalAveragePooling1D(data_format="channels_first")(x)
         for dim in mlp_units:
@@ -252,13 +252,13 @@ class TTCModel:
             self.input_shape,
             head_size=512,
             num_heads=4,
-            ff_dim=128,
+            ff_dim=8,
             num_transformer_blocks=4,
             mlp_units=[256, 128],
             mlp_dropout=0.3,
             dropout=0.3,
-            lstm_units=0,
-            feed_forward_type="mlp",
+            lstm_units=128,
+            feed_forward_type="cnn",
             hp = hp,
         )
 
