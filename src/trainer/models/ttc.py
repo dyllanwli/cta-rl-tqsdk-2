@@ -1,11 +1,10 @@
-# Transformer Time series classification 
+from typing import Dict
 import logging 
 import os 
 logging.getLogger('tensorflow').disabled = True
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 os.environ['__MODIN_AUTOIMPORT_PANDAS__'] = '1' # Fix modin warning 
 
-import pandas 
 import modin.pandas as pd
 import ray
 import tensorflow as tf
@@ -13,17 +12,17 @@ from tensorflow import keras
 from keras import layers, Model, models
 import keras_tuner as kt
 import numpy as np
-from datetime import datetime 
-from tqdm import tqdm
-import pytz
+
 import wandb
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import minmax_scale
 from wandb.keras import WandbCallback
 
-from utils.constant import mlp_units_dict, low_by_label_length, high_by_label_length
+from utils.preprocess import process_prev_close_spread, set_volatility_label, process_datatime
+from utils.tafunc import ema
+
 
 class TTCModel:
+    # Transformer Time series classification 
     def __init__(self, interval: str, commodity_name: str, max_encode_length: int = 60, max_label_length: int = 5):
         ray.init(include_dashboard=False)
         print('GPU name: ', tf.config.list_physical_devices('GPU'))
@@ -34,7 +33,7 @@ class TTCModel:
         self.max_label_length = max_label_length
 
         self.n_classes = 3
-        self.train_col_name = ["open", "high", "low", "close", "vol", "open_oi", "close_oi", "is_daytime"]
+        self.train_col_name = ["open", "high", "low", "close", "vol", "open_oi", "close_oi", "is_daytime", "label"] # add moving average will change this
         self.fit_config = {
             "batch_size": 512,
             "epochs": 100,
@@ -42,8 +41,7 @@ class TTCModel:
             "shuffle": True,
         }
         self.datatype_name = "{}{}_{}_{}".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length)
-        self.X_output_path = "./tmp/X_"+self.datatype_name+".npy"
-        self.y_output_path = "./tmp/y_"+self.datatype_name+".npy"
+        self.data_output_path = "./tmp/"+self.datatype_name+".csv"
     
     def _set_classes(self, y: np.ndarray):
         """
@@ -54,16 +52,42 @@ class TTCModel:
         self.n_classes = len(c)
         # print precents
         print("Class distribution: ", c[:, 1] / c[:, 1].sum())
+    
+    def _add_moving_average(self, df: pd.DataFrame, windows = [5, 10, 20, 30, 60]) -> pd.DataFrame:
+        print("Adding moving average")
+        for window in windows:
+            df["ma_{}".format(window)] = ema(df["close"], window)
+        self.train_col_name += ["ma_{}".format(window) for window in windows]
+        return df
+    
+    def _pre_process_data(self, data: Dict[str, pd.DataFrame], is_prev_close_spread: bool = True):
+        # start preprocessing by intervals
+        df = data["primary"]
+        print("Start preprocessing primary data")
+        df = pd.DataFrame(df)
+        df = process_datatime(df)
+
+        if is_prev_close_spread:
+            df = process_prev_close_spread(df)
+        df = set_volatility_label(df, self.max_label_length, self.n_classes, self.interval)
+        df = self._add_moving_average(df)
+        df = df.dropna(subset=self.train_col_name)
+
+        if data["secondary"] != None:
+            print("Start preprocessing secondary data")
+            df = pd.merge(df, data["secondary"], on="datetime", how="left")
+            self.train_col_name += data["secondary"].columns.tolist()
+        return df
         
     def set_training_data(self, data: pd.DataFrame, debug_mode: bool = False):
-        if isinstance(data, pandas.DataFrame):
-            X, y = self.pre_process_data(data)
+        if data != None:
+            data = self._pre_process_data(data)
             print("Saving data")
-            np.save(self.X_output_path, X)
-            np.save(self.y_output_path, y)
+            data.to_csv(self.data_output_path, index=False)
         else:
-            X = np.load(self.X_output_path)
-            y = np.load(self.y_output_path)
+            data = pd.read_csv(self.data_output_path)
+
+        X, y = data[self.train_col_name].to_numpy(), data["label"].to_numpy()
         if debug_mode:
             X = X[:100000]
             y = y[:100000]
@@ -71,111 +95,15 @@ class TTCModel:
         self._set_classes(y)
         # X = self.timeseries_normalize(X)
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=False)
-        del X, y
+        del X, y, data
         self.input_shape = self.X_train.shape[1:]
     
     def set_predict_data(self, data: pd.DataFrame):
         print("Set predict data")
-        X_predict, y = self.pre_process_data(data)
+        data = self._pre_process_data(data)
+        X, y = data[self.train_col_name].to_numpy(), data["label"].to_numpy()
         self._set_classes(y)
-        # np.save("./tmp/X_predict.npy", X)
-        # np.save("./tmp/y_predict.npy", y)
-        return X_predict, y
-
-    def timeseries_normalize(self, data: np.ndarray):
-        print("Normalizing data", data.shape)
-        normalize = lambda subset: minmax_scale(subset, axis=0)
-        for i in range(data.shape[0]):
-            data[i] = normalize(data[i])
-        return data 
-    
-    def _process_datatime(self, df: pd.DataFrame):
-        print("Processing datetime")
-        exchange_tz = pytz.timezone('Asia/Shanghai')
-        df["datetime"] =  df["datetime"].apply(lambda x: datetime.utcfromtimestamp(x.value / 1e9).astimezone(exchange_tz))
-        df["is_daytime"] = df["datetime"].apply(lambda x: x.hour * 3600 + x.minute * 60 + x.second)
-        return df
-    
-    def set_volatility_label(self, df: pd.DataFrame):
-        """
-            check if the price changes by percentage within max_label_length step
-            n_classes = 5
-            label range:
-                -inf ~ -high | -high ~ -low | -low ~ low | low ~ high | high ~ inf
-            e.g.
-                -inf ~ -0.01 | -0.01 ~ -0.005 | -0.005 ~ 0.005 | 0.005 ~ 0.01 | 0.01 ~ inf
-        """
-        # df = pd.DataFrame(df)
-        low = low_by_label_length[self.interval][self.max_label_length]
-        high = high_by_label_length[self.interval][self.max_label_length]
-
-        # reset the index from 0 to df.shape[0]
-        df = df.reset_index(drop=True).reset_index()
-        if self.n_classes == 5:
-            def check_volatility(v):
-                if v < -high:
-                    return 0
-                elif -high < v < -low:
-                    return 1
-                elif -low < v < low:
-                    return 2
-                elif low < v < high:
-                    return 3
-                elif high < v:
-                    return 4
-                else:
-                    return np.nan
-        elif self.n_classes == 3:
-            def check_volatility(v):
-                if v < -low:
-                    return 0
-                elif -low < v < low:
-                    return 1
-                elif low < v:
-                    return 2
-                else:
-                    return np.nan
-
-        numerator = df['close'].to_numpy()[self.max_label_length:]
-        denominator = df['close'].to_numpy()[:-self.max_label_length]
-        vol = numerator / denominator - 1
-        df = df.iloc[:-self.max_label_length]
-        df['vol'] = vol
-        df['vol'] = df['vol'].apply(lambda x: check_volatility(x))
-        print(df["vol"].value_counts())
-        df = df[self.train_col_name].dropna()
-        return df._to_pandas()
-    
-    def pre_process_data(self, df: pd.DataFrame):
-        # start preprocessing
-
-        def process_by_group(g) -> pd.DataFrame:    
-            print("Setting volatility label")    
-            g = self.set_volatility_label(g)
-            target_list = []
-            train_list = []
-            for i in tqdm(range(g.shape[0] - self.max_encode_length)):
-                # yield training, target 
-                train, target = g.iloc[i:i+self.max_encode_length].to_numpy(dtype=np.float32), g.iloc[i+self.max_encode_length]["vol"]
-                train_list.append(train)
-                target_list.append(target)
-            return train_list, target_list
-
-        print("Start preprocessing data")
-        df = pd.DataFrame(df)
-        df = self._process_datatime(df)
-        train = []
-        target = []
-
-        print("Processing group")
-        for g_name, g in df.groupby("underlying_symbol"):
-            print("Processing group: ", g_name)
-            x, y = process_by_group(g)
-            train += x
-            target += y
-
-        print("Preprocess data done.")
-        return np.array(train), np.array(target)
+        return X, y
 
     def build_model(
         self,
@@ -322,9 +250,6 @@ class TTCModel:
         print("Best config", best_hps_config)
         # set config to wandb
         wandb.config.update(best_hps_config)
-
-        # model = tuner.hypermodel.build(best_hps)
-        # history = model.fit(self.X_train, self.y_train, epochs=50, validation_split=0.2, callbacks=callbacks)
 
         hypermodel = tuner.hypermodel.build(best_hps)
 

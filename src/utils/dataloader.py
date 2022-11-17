@@ -137,6 +137,8 @@ class DataLoader:
             self.auth, self.backtest, self.init_balance)
 
     def get_offline_data(self, interval: str, instrument_id: str, offset: int, fixed_offset: bool = True, fixed_dt: bool = False) -> pd.DataFrame:
+        if not interval:
+            return None
         if fixed_dt:
             df = self.mongo.load_bar_data(instrument_id, self.start_dt, self.end_dt, interval, limit=offset)
             print("dataloader: Loaded offline data from ", self.start_dt, "with", df.shape[0], "to", df.iloc[-1].datetime)
