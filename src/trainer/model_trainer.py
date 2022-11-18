@@ -22,7 +22,7 @@ class ModelTrainer:
         self.symbol = get_symbols_by_names([self.commodity])[0]
         self.max_sample_size = int(max_sample_size)
     
-    def get_training_data(self, start_dt=date(2021, 1, 1), end_dt=date(2022, 1, 1)):
+    def get_training_data(self, start_dt=date(2016, 1, 1), end_dt=date(2022, 1, 1)):
         dataloader = DataLoader(start_dt=start_dt, end_dt=end_dt)
         data = dataloader.get_offline_data(
                     interval=self.interval, instrument_id=self.symbol, offset=self.max_sample_size, fixed_dt=True)
@@ -31,8 +31,8 @@ class ModelTrainer:
     def run(self, is_train=True):
         model = TTCModel(interval=self.interval, commodity_name=self.commodity, max_encode_length=120, max_label_length=10)
         if is_train:
-            data = self.get_training_data()
-            # data = False
+            # data = self.get_training_data()
+            data = []
             model.set_training_data(data)
             del data
             model.train()

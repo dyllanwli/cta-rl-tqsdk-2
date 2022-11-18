@@ -44,8 +44,9 @@ class TTCModel:
             "shuffle": True,
         }
         self.datatype_name = "{}{}_{}_{}".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length)
-        self.X_output_path = "./tmp/"+ "X_" + self.datatype_name+".npy"
-        self.y_output_path = "./tmp/"+ "y_" + self.datatype_name+".npy"
+        self.data_output_path = "./tmp/"+ self.datatype_name+".csv"
+        # self.X_output_path = "./tmp/"+ "X_" + self.datatype_name+".npy"
+        # self.y_output_path = "./tmp/"+ "y_" + self.datatype_name+".npy"
     
     def _set_classes(self, y: np.ndarray):
         """
@@ -77,14 +78,18 @@ class TTCModel:
         return df
         
     def set_training_data(self, data: pd.DataFrame):
-        if data:
+        if len(data) > 0:
             data = self._pre_process_data(data)
             print("Saving data")
-            np.save(self.X_output_path, data[self.train_col_name].to_numpy())
-            np.save(self.y_output_path, data["label"].to_numpy())
+            data.to_csv(self.data_output_path, index=False)
         else:
-            X = np.load(self.X_output_path)
-            y = np.load(self.y_output_path)
+            data = pd.read_csv(self.data_output_path)
+        
+        X = np.empty(shape = (data.shape[0] - self.max_encode_length, self.max_encode_length, len(self.train_col_name)), dtype=np.float32)
+        y = data.iloc[self.max_encode_length:]['label'].to_numpy(dtype=np.int32)
+        data = data[self.train_col_name].to_numpy(dtype=np.float32)
+        for i in range(X.shape[0]):
+            X[i] = data[i:i+self.max_encode_length]
 
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
         self._set_classes(y)
