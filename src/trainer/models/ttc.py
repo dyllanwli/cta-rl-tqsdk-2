@@ -1,4 +1,3 @@
-from typing import Dict
 import logging 
 import os 
 logging.getLogger('tensorflow').disabled = True
@@ -12,7 +11,6 @@ from tensorflow import keras
 from keras import layers, Model, models
 import keras_tuner as kt
 import numpy as np
-from tqdm import tqdm
 
 import wandb
 from sklearn.model_selection import train_test_split
@@ -61,7 +59,7 @@ class TTCModel:
     
     def _pre_process_data(self, df: pd.DataFrame, is_prev_close_spread: bool = True):
         # start preprocessing by intervals
-        print("Start preprocessing primary data")
+        print("Start preprocessing data")
         df = pd.DataFrame(df)
         df = process_datatime(df)
 
@@ -82,7 +80,7 @@ class TTCModel:
         return train_df, test_df
         
     def set_training_data(self, data: pd.DataFrame):
-        if data != None:
+        if data:
             data = self._pre_process_data(data)
             print("Saving data")
             data.to_csv(self.data_output_path, index=False)
@@ -92,7 +90,8 @@ class TTCModel:
         train_df, test_df = self._train_test_split(data, test_size = 0.2)
         X_train, y_train = train_df[self.train_col_name].to_numpy(), train_df["label"].to_numpy()
         X_test, y_test = test_df[self.train_col_name].to_numpy(), test_df["label"].to_numpy()
-        self.input_shape = X_train.shape[1:]
+        self.input_shape = X_train.shape
+        print("Input shape: ", self.input_shape)
         self.training_dataset = tf.keras.utils.timeseries_dataset_from_array(
             data=X_train, targets = y_train, sequence_length=self.max_encode_length, batch_size=self.fit_config["batch_size"], sampling_rate=1, sequence_stride=1, shuffle=False,
         )
@@ -225,7 +224,7 @@ class TTCModel:
         model.summary()
         return model
     
-    def tune(self, search_data_ratio: float = 0.5):
+    def tune(self):
         """
         Tune hyperparameters
         """
@@ -244,8 +243,7 @@ class TTCModel:
         ]
         print("Start tuning")
         tuner.search(
-            self.X_train[:int(len(self.X_train)*search_data_ratio)],
-            self.y_train[:int(len(self.y_train)*search_data_ratio)], 
+            self.train_dataset, 
             epochs=100, validation_split=self.fit_config["validation_split"],
             callbacks=callbacks, shuffle=True, batch_size=self.fit_config["batch_size"])
 
@@ -259,8 +257,7 @@ class TTCModel:
 
         # Retrain the model
         hypermodel.fit(
-            self.X_train,
-            self.y_train,
+            self.train_dataset, 
             validation_split=self.fit_config["validation_split"],
             epochs=self.fit_config["epochs"],
             batch_size=self.fit_config["batch_size"],
@@ -268,7 +265,7 @@ class TTCModel:
             callbacks=callbacks,
         )
 
-        eval_result = hypermodel.evaluate(self.X_test, self.y_test)
+        eval_result = hypermodel.evaluate(self.test_dataset)
         print("[test loss, test accuracy]:", eval_result)
 
     def train(self):
@@ -281,8 +278,7 @@ class TTCModel:
         ]
 
         model.fit(
-            self.X_train,
-            self.y_train,
+            self.train_dataset, 
             validation_split=self.fit_config["validation_split"],
             epochs=self.fit_config["epochs"],
             batch_size=self.fit_config["batch_size"],
@@ -290,7 +286,7 @@ class TTCModel:
             callbacks=callbacks,
         )
 
-        test_loss, test_acc = model.evaluate(self.X_test, self.y_test)
+        test_loss, test_acc = model.evaluate(self.test_dataset)
         print("Test loss:", test_loss)
         print("Test accuracy:", test_acc)
         return model
