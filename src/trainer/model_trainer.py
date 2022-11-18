@@ -18,7 +18,7 @@ class ModelTrainer:
             "%Y%m%d_%H-%M-%S") if self.train_type == "train" else False
         self.project_name = "futures-predict-8"
         self.interval = INTERVAL.FIVE_SEC
-        self.commodity = "cotton"
+        self.commodity = "methanol"
         self.symbol = get_symbols_by_names([self.commodity])[0]
         self.max_sample_size = int(max_sample_size)
     
@@ -29,13 +29,13 @@ class ModelTrainer:
         return data
 
     def run(self, is_train=True):
-        model = TTCModel(interval=self.interval, commodity_name=self.commodity, max_encode_length=120, max_label_length=5)
+        model = TTCModel(interval=self.interval, commodity_name=self.commodity, max_encode_length=200, max_label_length=20)
         if is_train:
-            # data = self.get_training_data()
-            data = []
+            data = self.get_training_data()
+            # data = []
             model.set_training_data(data)
             del data
-            model.train()
+            # model.train()
             # model.tune(search_data_ratio=0.5)
         else:
             predict_data = self.get_training_data(start_dt=date(2022, 1, 1), end_dt=date(2022, 8, 1))

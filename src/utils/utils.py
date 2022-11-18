@@ -14,7 +14,6 @@ def get_config() -> dict:
         config = yaml.safe_load(stream)
         return config
 
-
 SETTINGS = get_config()
 
 

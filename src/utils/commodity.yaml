@@ -7,7 +7,7 @@ commodity:
   rapeseed: CZCE.RS # 菜籽
   staple_fiber: CZCE.PF # 短纤
   cotton: CZCE.CF # 一号棉花 4.73 0 | 1s - 5s - 1m - 1d - 20160101 - 20220901
-  methanol: CZCE.MA # 甲醇
+  methanol: CZCE.MA # 甲醇 | 1s - 5s - 1m - 1d - 20160101 - 20220901
 
   stainless_steel: SHFE.ss # 不锈钢
   low_sulphur_fuel_oil: SHFE.lu # 低硫燃料油
