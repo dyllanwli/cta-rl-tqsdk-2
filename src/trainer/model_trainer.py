@@ -17,31 +17,25 @@ class ModelTrainer:
         self.wandb_name = self.algo_name + "_" + datetime.now().strftime(
             "%Y%m%d_%H-%M-%S") if self.train_type == "train" else False
         self.project_name = "futures-predict-8"
-        self.intervals = dict(
-            primary=INTERVAL.FIVE_SEC,
-            secondary=None
-        )
+        self.interval = INTERVAL.FIVE_SEC
         self.commodity = "cotton"
         self.symbol = get_symbols_by_names([self.commodity])[0]
         self.max_sample_size = int(max_sample_size)
     
-    def get_training_data(self, start_dt=date(2016, 1, 1), end_dt=date(2022, 1, 1)):
+    def get_training_data(self, start_dt=date(2021, 1, 1), end_dt=date(2022, 1, 1)):
         dataloader = DataLoader(start_dt=start_dt, end_dt=end_dt)
-        data = dict(
-            primary=dataloader.get_offline_data(
-                    interval=self.intervals["primary"], instrument_id=self.symbol, offset=self.max_sample_size, fixed_dt=True),
-            secondary=dataloader.get_offline_data(
-                    interval=self.intervals["secondary"], instrument_id=self.symbol, offset=self.max_sample_size, fixed_dt=True),
-        )
+        data = dataloader.get_offline_data(
+                    interval=self.interval, instrument_id=self.symbol, offset=self.max_sample_size, fixed_dt=True),
         return data
 
     def run(self, is_train=True):
-        model = TTCModel(interval=self.intervals["primary"], commodity_name=self.commodity, max_encode_length=120, max_label_length=10)
+        model = TTCModel(interval=self.interval, commodity_name=self.commodity, max_encode_length=120, max_label_length=10)
         if is_train:
             data = self.get_training_data()
             # data = None
             model.set_training_data(data)
-            # model.train()
+            del data
+            model.train()
             # model.tune(search_data_ratio=0.5)
         else:
             predict_data = self.get_training_data(start_dt=date(2022, 1, 1), end_dt=date(2022, 8, 1))

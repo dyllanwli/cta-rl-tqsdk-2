@@ -12,6 +12,7 @@ from tensorflow import keras
 from keras import layers, Model, models
 import keras_tuner as kt
 import numpy as np
+from tqdm import tqdm
 
 import wandb
 from sklearn.model_selection import train_test_split
@@ -33,7 +34,7 @@ class TTCModel:
         self.max_label_length = max_label_length
 
         self.n_classes = 3
-        self.train_col_name = ["open", "high", "low", "close", "volume", "open_oi", "close_oi", "is_daytime", "label"] # add moving average will change this
+        self.train_col_name = ["open", "high", "low", "close", "volume", "open_oi", "close_oi", "is_daytime"] # add moving average will change this
         self.fit_config = {
             "batch_size": 512,
             "epochs": 100,
@@ -58,9 +59,8 @@ class TTCModel:
         self.train_col_name += ["ma_{}".format(window) for window in windows]
         return df
     
-    def _pre_process_data(self, data: Dict[str, pd.DataFrame], is_prev_close_spread: bool = True):
+    def _pre_process_data(self, df: pd.DataFrame, is_prev_close_spread: bool = True):
         # start preprocessing by intervals
-        df = data["primary"]
         print("Start preprocessing primary data")
         df = pd.DataFrame(df)
         df = process_datatime(df)
@@ -70,33 +70,37 @@ class TTCModel:
         df = set_volatility_label(df, self.max_label_length, self.n_classes, self.interval)
         df = self._add_moving_average(df)
         print(df.shape)
-        df = df.dropna(subset=self.train_col_name)
-
-        if data["secondary"] != None:
-            print("Start preprocessing secondary data")
-            df = pd.merge(df, data["secondary"], on="datetime", how="left")
-            self.train_col_name += data["secondary"].columns.tolist()
+        df = df[self.train_col_name + ["label"]].dropna()
+        print(self.train_col_name + ["label"])
         return df
+    
+    def _train_test_split(self, df: pd.DataFrame, test_size: float = 0.2):
+        train_size = int(len(df) * (1 - test_size))
+        train_size -= train_size%self.max_encode_length
+        train_df = df.iloc[:train_size]
+        test_df = df.iloc[train_size:]
+        return train_df, test_df
         
-    def set_training_data(self, data: pd.DataFrame, debug_mode: bool = False):
+    def set_training_data(self, data: pd.DataFrame):
         if data != None:
             data = self._pre_process_data(data)
             print("Saving data")
             data.to_csv(self.data_output_path, index=False)
         else:
             data = pd.read_csv(self.data_output_path)
-
-        print("Set training data", self.train_col_name)
-        X, y = data[self.train_col_name].to_numpy(), data["label"].to_numpy()
-        if debug_mode:
-            X = X[:100000]
-            y = y[:100000]
         
-        self._set_classes(y)
-        # X = self.timeseries_normalize(X)
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=False)
-        del X, y, data
-        self.input_shape = self.X_train.shape[1:]
+        train_df, test_df = self._train_test_split(data, test_size = 0.2)
+        X_train, y_train = train_df[self.train_col_name].to_numpy(), train_df["label"].to_numpy()
+        X_test, y_test = test_df[self.train_col_name].to_numpy(), test_df["label"].to_numpy()
+        self.input_shape = X_train.shape[1:]
+        self.training_dataset = tf.keras.utils.timeseries_dataset_from_array(
+            data=X_train, targets = y_train, sequence_length=self.max_encode_length, batch_size=self.fit_config["batch_size"], sampling_rate=1, sequence_stride=1, shuffle=False,
+        )
+        self.test_dataset = tf.keras.utils.timeseries_dataset_from_array(
+            data=X_test, targets = y_test, sequence_length=self.max_encode_length, batch_size=self.fit_config["batch_size"], sampling_rate=1, sequence_stride=1, shuffle=False,
+        )
+        self._set_classes(y_test)
+        del X_train, y_train, X_test, y_test, data, train_df, test_df
     
     def set_predict_data(self, data: pd.DataFrame):
         print("Set predict data")
