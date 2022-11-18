@@ -15,7 +15,7 @@ INTERVAL = Interval()
 
 low_by_label_length = {
     INTERVAL.FIVE_SEC: {
-        5: 0.0002, # 0.02%
+        5: 0.0001, # 0.01%
         10: 0.0005, # 0.05%
     }, 
     INTERVAL.ONE_MIN: {
@@ -27,7 +27,7 @@ low_by_label_length = {
 
 high_by_label_length = {
     INTERVAL.FIVE_SEC: {
-        5: 0.0004, # 0.04%
+        5: 0.0002, # 0.04%
         10: 0.001, # 0.1%
     },
     INTERVAL.ONE_MIN: {

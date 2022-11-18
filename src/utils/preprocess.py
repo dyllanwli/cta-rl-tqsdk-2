@@ -49,25 +49,25 @@ def set_volatility_label(df: pd.DataFrame, max_label_length, n_classes, interval
     df = df.reset_index(drop=True).reset_index()
     if n_classes == 5:
         def check_volatility(v):
-            if v < -high:
+            if v <= -high:
                 return 0
-            elif -high < v < -low:
+            elif -high < v <= -low:
                 return 1
-            elif -low < v < low:
+            elif -low < v <= low:
                 return 2
             elif low < v < high:
                 return 3
-            elif high < v:
+            elif high <= v:
                 return 4
             else:
                 return np.nan
     elif n_classes == 3:
         def check_volatility(v):
-            if v < -low:
+            if v <= -low:
                 return 0
             elif -low < v < low:
                 return 1
-            elif low < v:
+            elif low <= v:
                 return 2
             else:
                 return np.nan
