@@ -179,16 +179,16 @@ class TTCModel:
             input_shape = self.input_shape,
             head_size = 512,
             num_heads = 4,
-            ff_dim = 8,
-            num_transformer_blocks = 4,
+            ff_dim = 128,
+            num_transformer_blocks = 6,
             mlp_units = [256, 128],
             dropout = 0.3,
             mlp_dropout = 0.3,
             lstm_units = 128,
-            feed_forward_type = "cnn",
+            feed_forward_type = "mlp",
         )
-
         if hp == False:
+            print("Model config: ", model_config)
             # update config if not hyperparameter tuning
             wandb.config.update(model_config)
 
