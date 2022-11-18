@@ -12,6 +12,8 @@ from keras import layers, Model, models
 import keras_tuner as kt
 import numpy as np
 
+from tqdm import tqdm
+
 import wandb
 from sklearn.model_selection import train_test_split
 from wandb.keras import WandbCallback
@@ -33,6 +35,8 @@ class TTCModel:
 
         self.n_classes = 3
         self.train_col_name = ["open", "high", "low", "close", "volume", "open_oi", "close_oi", "is_daytime"] # add moving average will change this
+        self.windows = [5, 10, 20, 30, 60]
+        self.train_col_name += ["ma_{}".format(window) for window in self.windows]
         self.fit_config = {
             "batch_size": 512,
             "epochs": 100,
@@ -40,7 +44,8 @@ class TTCModel:
             "shuffle": True,
         }
         self.datatype_name = "{}{}_{}_{}".format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length)
-        self.data_output_path = "./tmp/"+self.datatype_name+".csv"
+        self.X_output_path = "./tmp/"+ "X_" + self.datatype_name+".npy"
+        self.y_output_path = "./tmp/"+ "y_" + self.datatype_name+".npy"
     
     def _set_classes(self, y: np.ndarray):
         """
@@ -50,11 +55,10 @@ class TTCModel:
         print("Class distribution: ", c, c[:, 1] / c[:, 1].sum())
         self.n_classes = len(c)
     
-    def _add_moving_average(self, df: pd.DataFrame, windows = [5, 10, 20, 30, 60]) -> pd.DataFrame:
+    def _add_moving_average(self, df: pd.DataFrame) -> pd.DataFrame:
         print("Adding moving average")
-        for window in windows:
+        for window in self.windows:
             df["ma_{}".format(window)] = ema(df["close"], window)
-        self.train_col_name += ["ma_{}".format(window) for window in windows]
         return df
     
     def _pre_process_data(self, df: pd.DataFrame, is_prev_close_spread: bool = True):
@@ -71,35 +75,22 @@ class TTCModel:
         df = df[self.train_col_name + ["label"]].dropna()
         print(self.train_col_name + ["label"])
         return df
-    
-    def _train_test_split(self, df: pd.DataFrame, test_size: float = 0.2):
-        train_size = int(len(df) * (1 - test_size))
-        train_size -= train_size%self.max_encode_length
-        train_df = df.iloc[:train_size]
-        test_df = df.iloc[train_size:]
-        return train_df, test_df
         
     def set_training_data(self, data: pd.DataFrame):
         if data:
             data = self._pre_process_data(data)
             print("Saving data")
-            data.to_csv(self.data_output_path, index=False)
+            np.save(self.X_output_path, data[self.train_col_name].to_numpy())
+            np.save(self.y_output_path, data["label"].to_numpy())
         else:
-            data = pd.read_csv(self.data_output_path)
-        
-        train_df, test_df = self._train_test_split(data, test_size = 0.2)
-        X_train, y_train = train_df[self.train_col_name].to_numpy(), train_df["label"].to_numpy()
-        X_test, y_test = test_df[self.train_col_name].to_numpy(), test_df["label"].to_numpy()
-        self.input_shape = X_train.shape
+            X = np.load(self.X_output_path)
+            y = np.load(self.y_output_path)
+
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+        self._set_classes(y)
+        del X, y, data
+        self.input_shape = self.X_train[0].shape
         print("Input shape: ", self.input_shape)
-        self.training_dataset = tf.keras.utils.timeseries_dataset_from_array(
-            data=X_train, targets = y_train, sequence_length=self.max_encode_length, batch_size=self.fit_config["batch_size"], sampling_rate=1, sequence_stride=1, shuffle=False,
-        )
-        self.test_dataset = tf.keras.utils.timeseries_dataset_from_array(
-            data=X_test, targets = y_test, sequence_length=self.max_encode_length, batch_size=self.fit_config["batch_size"], sampling_rate=1, sequence_stride=1, shuffle=False,
-        )
-        self._set_classes(y_test)
-        del X_train, y_train, X_test, y_test, data, train_df, test_df
     
     def set_predict_data(self, data: pd.DataFrame):
         print("Set predict data")
@@ -243,7 +234,8 @@ class TTCModel:
         ]
         print("Start tuning")
         tuner.search(
-            self.train_dataset, 
+            self.X_train,
+            self.y_train,
             epochs=100, validation_split=self.fit_config["validation_split"],
             callbacks=callbacks, shuffle=True, batch_size=self.fit_config["batch_size"])
 
@@ -257,7 +249,8 @@ class TTCModel:
 
         # Retrain the model
         hypermodel.fit(
-            self.train_dataset, 
+            self.X_train,
+            self.y_train,
             validation_split=self.fit_config["validation_split"],
             epochs=self.fit_config["epochs"],
             batch_size=self.fit_config["batch_size"],
@@ -265,7 +258,7 @@ class TTCModel:
             callbacks=callbacks,
         )
 
-        eval_result = hypermodel.evaluate(self.test_dataset)
+        eval_result = hypermodel.evaluate(self.X_test, self.y_test)
         print("[test loss, test accuracy]:", eval_result)
 
     def train(self):
@@ -278,7 +271,8 @@ class TTCModel:
         ]
 
         model.fit(
-            self.train_dataset, 
+            self.X_train,
+            self.y_train,
             validation_split=self.fit_config["validation_split"],
             epochs=self.fit_config["epochs"],
             batch_size=self.fit_config["batch_size"],
@@ -286,7 +280,7 @@ class TTCModel:
             callbacks=callbacks,
         )
 
-        test_loss, test_acc = model.evaluate(self.test_dataset)
+        test_loss, test_acc = model.evaluate(self.X_test, self.y_test)
         print("Test loss:", test_loss)
         print("Test accuracy:", test_acc)
         return model
