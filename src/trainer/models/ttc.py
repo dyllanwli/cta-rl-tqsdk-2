@@ -92,8 +92,8 @@ class TTCModel:
     
     def _set_train_dataset(self, data: pd.DataFrame):
         print("Splitting data")
-        train, test = train_test_split(data, test_size=0.5, shuffle=False)
-        train, val = train_test_split(train, test_size=0.25, shuffle=False)
+        train, test = train_test_split(data, test_size=0.3, shuffle=False)
+        train, val = train_test_split(train, test_size=0.4, shuffle=False)
         
         self._set_classes(train.iloc[self.max_encode_length:]['label'].to_numpy(dtype=np.int32))
 
