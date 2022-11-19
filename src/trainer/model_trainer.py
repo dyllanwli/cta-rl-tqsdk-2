@@ -9,14 +9,9 @@ from .models import TTCModel
 from utils.constant import INTERVAL
 
 class ModelTrainer:
-    def __init__(self, account = "a1", train_type = "tune", max_sample_size = 1e8):
+    def __init__(self, account = "a1", max_sample_size = 1e8):
         print("Initializing Model trainer")
-        auth = get_auth(account)
-        self.train_type = train_type  # tune or train
-        
-        self.wandb_name = self.algo_name + "_" + datetime.now().strftime(
-            "%Y%m%d_%H-%M-%S") if self.train_type == "train" else False
-        self.project_name = "futures-predict-8"
+        # auth = get_auth(account)
         self.interval = INTERVAL.FIVE_SEC
         self.commodity = "methanol"
         self.symbol = get_symbols_by_names([self.commodity])[0]
@@ -35,7 +30,7 @@ class ModelTrainer:
             # data = []
             model.set_training_data(data)
             del data
-            # model.train()
+            model.train()
             # model.tune(search_data_ratio=0.5)
         else:
             predict_data = self.get_training_data(start_dt=date(2022, 1, 1), end_dt=date(2022, 8, 1))

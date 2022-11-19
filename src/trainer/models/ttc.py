@@ -38,7 +38,7 @@ class TTCModel:
         self.windows = [5, 10, 20, 30, 60]
         self.train_col_name += ["ma_{}".format(window) for window in self.windows]
         self.fit_config = {
-            "batch_size": 512,
+            "batch_size": 256,
             "epochs": 100,
             "validation_split": 0.3,
             "shuffle": True,
