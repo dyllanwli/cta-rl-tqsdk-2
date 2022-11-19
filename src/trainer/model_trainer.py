@@ -13,7 +13,7 @@ class ModelTrainer:
         print("Initializing Model trainer")
         # auth = get_auth(account)
         self.interval = INTERVAL.FIVE_SEC
-        self.commodity = "cotton"
+        self.commodity = "methanol"
         self.symbol = get_symbols_by_names([self.commodity])[0]
         self.max_sample_size = int(max_sample_size)
     
@@ -24,7 +24,7 @@ class ModelTrainer:
         return data
 
     def run(self, is_train=True):
-        model = TTCModel(interval=self.interval, commodity_name=self.commodity, max_encode_length=120, max_label_length=10)
+        model = TTCModel(interval=self.interval, commodity_name=self.commodity, max_encode_length=200, max_label_length=20)
         if is_train:
             # data = self.get_training_data()
             data = []

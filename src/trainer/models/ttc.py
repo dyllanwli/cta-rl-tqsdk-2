@@ -13,6 +13,7 @@ import keras_tuner as kt
 import numpy as np
 
 from tqdm import tqdm
+import time
 
 import wandb
 from sklearn.model_selection import train_test_split
@@ -76,7 +77,55 @@ class TTCModel:
         df = df[self.train_col_name + ["label"]].dropna()
         print(self.train_col_name + ["label"])
         return df
+    
+    def _set_train_test(self, data: pd.DataFrame):
+        X = np.empty(shape = (data.shape[0] - self.max_encode_length, self.max_encode_length, len(self.train_col_name)), dtype=np.float32)
+        y = data.iloc[self.max_encode_length:]['label'].to_numpy(dtype=np.int32)
+        data = data[self.train_col_name].to_numpy(dtype=np.float32)
+        for i in range(X.shape[0]):
+            X[i] = data[i:i+self.max_encode_length]
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.3, shuffle=False)
+        self._set_classes(y)
+        del X, y, data
+        self.input_shape = self.X_train[0].shape
+        print("Input shape: ", self.input_shape)
+    
+    def _set_train_dataset(self, data: pd.DataFrame):
+        print("Splitting data")
+        train, test = train_test_split(data, test_size=0.5, shuffle=False)
+        train, val = train_test_split(train, test_size=0.25, shuffle=False)
         
+        self._set_classes(train.iloc[self.max_encode_length:]['label'].to_numpy(dtype=np.int32))
+
+        self.train_dataset = tf.keras.preprocessing.timeseries_dataset_from_array(
+            data=train.iloc[:-self.max_encode_length][self.train_col_name].to_numpy(dtype=np.float32),
+            targets=train.iloc[self.max_encode_length:]['label'].to_numpy(dtype=np.int32),
+            sequence_length=self.max_encode_length,
+            sequence_stride=1,
+            sampling_rate=1,
+            batch_size=self.fit_config["batch_size"],
+            shuffle=False,
+        )
+        self.val_dataset = tf.keras.preprocessing.timeseries_dataset_from_array(
+            data=val.iloc[:-self.max_encode_length][self.train_col_name].to_numpy(dtype=np.float32),
+            targets=val.iloc[self.max_encode_length:]['label'].to_numpy(dtype=np.int32),
+            sequence_length=self.max_encode_length,
+            sequence_stride=1,
+            sampling_rate=1,
+            batch_size=self.fit_config["batch_size"],
+            shuffle=False,
+        )
+        self.test_dataset = tf.keras.preprocessing.timeseries_dataset_from_array(
+            data=test.iloc[:-self.max_encode_length][self.train_col_name].to_numpy(dtype=np.float32),
+            targets=test.iloc[self.max_encode_length:]['label'].to_numpy(dtype=np.int32),
+            sequence_length=self.max_encode_length,
+            sequence_stride=1,
+            sampling_rate=1,
+            batch_size=self.fit_config["batch_size"],
+            shuffle=False,
+        )
+        self.input_shape = (self.max_encode_length, len(self.train_col_name))
+
     def set_training_data(self, data: pd.DataFrame):
         if len(data) > 0:
             data = self._pre_process_data(data)
@@ -84,19 +133,9 @@ class TTCModel:
             data.to_csv(self.data_output_path, index=False)
         else:
             data = pd.read_csv(self.data_output_path)
-        
-        X = np.empty(shape = (data.shape[0] - self.max_encode_length, self.max_encode_length, len(self.train_col_name)), dtype=np.float32)
-        y = data.iloc[self.max_encode_length:]['label'].to_numpy(dtype=np.int32)
-        data = data[self.train_col_name].to_numpy(dtype=np.float32)
-        for i in range(X.shape[0]):
-            X[i] = data[i:i+self.max_encode_length]
 
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.5, shuffle=False)
-        self._set_classes(y)
-        del X, y, data
-        self.input_shape = self.X_train[0].shape
-        print("Input shape: ", self.input_shape)
-    
+        self._set_train_dataset(data._to_pandas())
+
     def set_predict_data(self, data: pd.DataFrame):
         print("Set predict data")
         data = self._pre_process_data(data)
@@ -239,9 +278,10 @@ class TTCModel:
         ]
         print("Start tuning")
         tuner.search(
-            self.X_train,
-            self.y_train,
-            epochs=100, validation_split=self.fit_config["validation_split"],
+            self.train_dataset,
+            validation_data = self.val_dataset,
+            # validation_split=self.fit_config["validation_split"],
+            epochs=100, 
             callbacks=callbacks, shuffle=True, batch_size=self.fit_config["batch_size"])
 
         best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
@@ -254,16 +294,16 @@ class TTCModel:
 
         # Retrain the model
         hypermodel.fit(
-            self.X_train,
-            self.y_train,
-            validation_split=self.fit_config["validation_split"],
+            self.train_dataset,
+            validation_data = self.val_dataset,
+            # validation_split=self.fit_config["validation_split"],
             epochs=self.fit_config["epochs"],
             batch_size=self.fit_config["batch_size"],
             shuffle=self.fit_config["shuffle"], 
             callbacks=callbacks,
         )
 
-        eval_result = hypermodel.evaluate(self.X_test, self.y_test)
+        eval_result = hypermodel.evaluate(self.test_dataset)
         print("[test loss, test accuracy]:", eval_result)
 
     def train(self):
@@ -276,16 +316,16 @@ class TTCModel:
         ]
 
         model.fit(
-            self.X_train,
-            self.y_train,
-            validation_split=self.fit_config["validation_split"],
+            self.train_dataset,
+            validation_data = self.val_dataset,
+            # validation_split=self.fit_config["validation_split"],
             epochs=self.fit_config["epochs"],
             batch_size=self.fit_config["batch_size"],
             shuffle=self.fit_config["shuffle"],
             callbacks=callbacks,
         )
 
-        test_loss, test_acc = model.evaluate(self.X_test, self.y_test)
+        test_loss, test_acc = model.evaluate(self.test_dataset)
         print("Test loss:", test_loss)
         print("Test accuracy:", test_acc)
         return model

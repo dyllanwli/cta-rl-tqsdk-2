@@ -24,9 +24,10 @@ def process_prev_close_spread(df: pd.DataFrame) -> pd.DataFrame:
             prev_close_spread_price = tmp_df.iloc[-1]["close"]
         else:
             # Get price spread by diff of close price
-            prev_close_spread_price -= tmp_df.iloc[-1]["close"]
+            offset = prev_close_spread_price - tmp_df.iloc[0]["close"]
             # print(prev_close_spread_price)
-            tmp_df[price_cols] += prev_close_spread_price
+            tmp_df[price_cols] += offset
+            prev_close_spread_price = tmp_df.iloc[-1]["close"]
         new_df = pd.concat([new_df, tmp_df])
     print("Processing prev close spread time:", time.time() - start)
     del df
