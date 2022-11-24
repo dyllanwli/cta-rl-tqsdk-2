@@ -3,7 +3,7 @@ from utils.utils import get_auth
 from db.mongo import Mongo
 
 def main():
-    auth = get_auth(account= "a1")
+    auth, _ = get_auth(account= "a1")
     dao = Mongo()
     # intervals = {'1s', '5s', '1m', '1d'}
     # symbol_list = ['soybean_oil']

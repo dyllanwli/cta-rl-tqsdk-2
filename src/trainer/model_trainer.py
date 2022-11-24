@@ -11,7 +11,7 @@ from utils.constant import INTERVAL
 class ModelTrainer:
     def __init__(self, account = "a1", max_sample_size = 1e8):
         print("Initializing Model trainer")
-        # auth = get_auth(account)
+        # auth, _ = get_auth(account)
         self.interval = INTERVAL.FIVE_SEC
         self.commodity = "methanol"
         self.symbol = get_symbols_by_names([self.commodity])[0]

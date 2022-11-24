@@ -31,7 +31,6 @@ tf.io.gfile = tb.compat.tensorflow_stub.io.gfile
 
 class TFTModel:
     """
-
     # model.print_baseline()
     # model.get_optimal_lr()
     # trainer = model.train()
