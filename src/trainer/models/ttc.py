@@ -39,7 +39,7 @@ class TTCModel:
         self.windows = [5, 10, 20, 30, 60]
         self.train_col_name += ["ma_{}".format(window) for window in self.windows]
         self.fit_config = {
-            "batch_size": 256,
+            "batch_size": 512,
             "epochs": 100,
             "validation_split": 0.3,
             "shuffle": True,
@@ -93,7 +93,7 @@ class TTCModel:
     def _set_train_dataset(self, data: pd.DataFrame):
         print("Splitting data")
         train, test = train_test_split(data, test_size=0.3, shuffle=False)
-        train, val = train_test_split(train, test_size=0.4, shuffle=False)
+        train, val = train_test_split(train, test_size=0.3, shuffle=False)
         
         self._set_classes(train.iloc[self.max_encode_length:]['label'].to_numpy(dtype=np.int32))
 
@@ -112,7 +112,7 @@ class TTCModel:
             sequence_length=self.max_encode_length,
             sequence_stride=1,
             sampling_rate=1,
-            batch_size=self.fit_config["batch_size"],
+            batch_size=self.fit_config["batch_size"]*2,
             shuffle=False,
         )
         self.test_dataset = tf.keras.preprocessing.timeseries_dataset_from_array(
@@ -218,12 +218,12 @@ class TTCModel:
             input_shape = self.input_shape,
             head_size = 512,
             num_heads = 4,
-            ff_dim = 8,
-            num_transformer_blocks = 6,
-            mlp_units = [256, 128],
+            ff_dim = 4,
+            num_transformer_blocks = 4,
+            mlp_units = [128, 64],
             dropout = 0.3,
             mlp_dropout = 0.3,
-            lstm_units = 128,
+            lstm_units = 0,
             feed_forward_type = "cnn",
         )
         if hp == False:
@@ -246,7 +246,7 @@ class TTCModel:
         )
 
         lr = keras.optimizers.schedules.ExponentialDecay(
-            initial_learning_rate=1e-3,
+            initial_learning_rate=1e-4,
             decay_steps=10000,
             decay_rate=0.9,
         )
