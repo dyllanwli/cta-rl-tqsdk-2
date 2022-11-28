@@ -17,3 +17,4 @@ pip install -U modin
 pip install -q -U keras-tuner
 pip install wandb
 pip install pyyaml==6.0
+# pip install beautifulsoup4
