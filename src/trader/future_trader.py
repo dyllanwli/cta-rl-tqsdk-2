@@ -31,6 +31,7 @@ class FugureTrader:
             from .strategies.simple_hf import backtest
             symbol = "DCE.i2301"
             tick_price = 0.5
+            close_countdown_second = 3
             backtest(
                 auth=self.auth,
                 symbol=symbol,
@@ -38,6 +39,7 @@ class FugureTrader:
                 commission_fee=self.commission_fee,
                 volume=self.volume,
                 tick_price=tick_price,
+                close_countdown_second=close_countdown_second,
                 start_dt=date(2022, 11, 20),
                 end_dt=date(2022, 11, 30)
             )
