@@ -6,7 +6,7 @@ from utils.dataloader import get_symbols_by_names
 
 
 class FugureTrader:
-    def __init__(self, account="a1"):
+    def __init__(self, account="a4"):
         self.auth, _ = get_auth(account)
         self.commodity = "iron_orb"
         self.symbol = get_symbols_by_names([self.commodity])[0]
@@ -14,7 +14,7 @@ class FugureTrader:
         self.volume = 5
         self.commission_fee = 7.7
 
-    def backtest(self, strategy: str = "simple_ema"):
+    def backtest(self, strategy: str = "simple_arbitrage"):
         if strategy == "simple_ema":
             from .strategies.simple_ema import backtest
             backtest(
@@ -30,8 +30,8 @@ class FugureTrader:
         elif strategy == "simple_hf":
             from .strategies.simple_hf import backtest
             symbol = "DCE.i2301"
-            tick_price = 0.5
-            close_countdown_second = 3
+            tick_price = 1
+            close_countdown_seconds = 5
             backtest(
                 auth=self.auth,
                 symbol=symbol,
@@ -39,7 +39,13 @@ class FugureTrader:
                 commission_fee=self.commission_fee,
                 volume=self.volume,
                 tick_price=tick_price,
-                close_countdown_second=close_countdown_second,
+                close_countdown_seconds=close_countdown_seconds,
                 start_dt=date(2022, 11, 20),
                 end_dt=date(2022, 11, 30)
             )
+        elif strategy == "simple_arbitrage":
+            from .strategies.simple_arbitrage import SimpleArbitrage
+            model = SimpleArbitrage(
+                auth=self.auth,
+            )
+            model.backtest()

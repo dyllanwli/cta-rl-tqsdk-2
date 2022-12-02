@@ -5,33 +5,43 @@ from collections import deque
 import time
 import wandb
 from tqsdk import TqApi, TqAuth, TqBacktest, TargetPosTask, BacktestFinished, TqSim
+from tqsdk.tafunc import time_to_s_timestamp
 from tqsdk.objs import Quote, Order
-from tqsdk.ta import EXPMA
+from tqsdk.ta import EMA
 
 import pytz
 import pandas as pd 
 
 
-def close_pos_by_day(dt: int, current_pos: int):
+def check_daytrading(dt: int):
     """
     close position at the end of the day
     """
     exchange_tz = pytz.timezone('Asia/Shanghai')
     dt = datetime.utcfromtimestamp(dt / 1e9).astimezone(exchange_tz)
     if (dt.hour == 14 and dt.minute > 55) or (dt.hour == 22 or dt.minute > 55):
-        return 0
-    return current_pos
+        return False
+    else:
+        return True
 
 def get_high_direction(bar: pd.DataFrame):
     """
     get direction with EMA
     """
-    ema_5 = EXPMA(bar.close, 5)
+    ema_5 = EMA(bar, 3)['ema']
     # if ema is going up, long
-    if ema_5[-1] > ema_5[-2]:
+    if ema_5.iloc[-1] > ema_5.iloc[-2]:
         return 1
     # if ema is going down, short
-    elif ema_5[-1] < ema_5[-2]:
+    elif ema_5.iloc[-1] < ema_5.iloc[-2]:
+        return -1
+    else:
+        return 0
+    
+def get_simple_direction(bar: pd.DataFrame):
+    if bar.iloc[-1]['close'] > bar.iloc[-2]['close']:
+        return 1
+    elif bar.iloc[-1]['close'] < bar.iloc[-2]['close']:
         return -1
     else:
         return 0
@@ -44,7 +54,7 @@ def backtest(
     volume: int,
     tick_price: float,
     close_countdown_seconds: int,
-    warmup_seconds: int = 10,
+    warmup_seconds: int = 1,
     start_dt=date(2022, 11, 1),
     end_dt=date(2022, 11, 30)
 ):  
@@ -52,7 +62,7 @@ def backtest(
     sim = TqSim(init_balance=200000)
     api = TqApi(account=sim, auth=auth, backtest=TqBacktest(
         start_dt=start_dt, end_dt=end_dt), web_gui=False)
-    sim.set_commission(symbol=symbol, commission_fee=commission_fee)
+    sim.set_commission(symbol=symbol, commission=commission_fee)
     if is_wandb:
         wandb.init(project="backtest-1",
                    config={"symbol": symbol, "factor": "ema"})
@@ -61,10 +71,9 @@ def backtest(
         try:
             print("Backtesting")
             high_freq_bar = api.get_kline_serial(
-                symbol, duration_seconds=1, data_length=200)
+                symbol, duration_seconds=1, data_length=20)
             quote: Quote = api.get_quote(symbol)
             account = api.get_account()
-            current_pos = 0
 
             historical_ask_volume1 = deque([], maxlen=warmup_seconds)
             historical_bid_volume1 = deque([], maxlen=warmup_seconds)
@@ -75,17 +84,21 @@ def backtest(
                 api.wait_update()
                 historical_ask_volume1.append(quote.ask_volume1)
                 historical_bid_volume1.append(quote.bid_volume1)
-
+            
             while True:
                 api.wait_update()
 
-                if api.is_changing(high_freq_bar.iloc[-1], "datetime"):
-                    high_direction = get_high_direction(high_freq_bar)
-                    if high_direction == 1:
+                if api.is_changing(quote) and check_daytrading(high_freq_bar.iloc[-1]["datetime"]):
+                    historical_ask_volume1.append(quote.ask_volume1)
+                    historical_bid_volume1.append(quote.bid_volume1)
+                    bid_ask_diff = sum(historical_bid_volume1) - sum(historical_ask_volume1)
+                    direction = 1 if bid_ask_diff > 0 else -1
+                    
+                    if direction == 1:
                         open_order: Order = api.insert_order(
                             symbol=symbol, direction="BUY", offset="OPEN", volume=volume, limit_price = quote.ask_price1, advanced="FAK")
 
-                        while open_order.status != "FINISHED":
+                        while open_order.status == "ALIVE":
                             api.wait_update()
 
                         close_price = open_order.trade_price + tick_price
@@ -95,40 +108,76 @@ def backtest(
                             close_order: Order = api.insert_order(
                                 symbol=symbol, direction="SELL", offset="CLOSE", volume=close_volume, limit_price=close_price)
                             close_time = time.time()
-                            while close_order.status != "FINISHED" and api.is_changing(quote):
-                                historical_ask_volume1.append(quote.ask_volume1)
-                                historical_bid_volume1.append(quote.bid_volume1)
-                                ask_bid_index = sum(historical_ask_volume1) / sum(historical_bid_volume1)
-
+                            while close_order.status == "ALIVE" and close_order.volume_left != 0:
                                 api.wait_update()
+
+                                if api.is_changing(close_order):
+                                    print("close_order: %s, completed: %d" % (close_order.status, close_order.volume_orign - close_order.volume_left))
+
                                 if time.time() - close_time >= close_countdown_seconds:
-                                    print("cancel and reinsert order at market price")
-                                    api.cancel_order(close_order)
-                                    if (not close_order and api.is_changing(quote)):
+                                    # cancel and reinsert order at market price
+                                    if close_order.status == "ALIVE" and close_order.trade_price != quote.bid_price1:
+                                        api.cancel_order(close_order)
                                         close_order: Order = api.insert_order(
-                                            symbol=symbol, direction="SELL", offset="CLOSE", volume=close_order.get("volume_left", 0), limit_price=quote.bid_price1)
-                                        close_time = time.time()
-                                
-                elif high_direction == -1:
+                                            symbol=symbol, direction="SELL", offset="CLOSE", volume=close_order.volume_left, limit_price=quote.bid_price1)
+                                    continue
+
+                                if close_price < quote.bid_price1:
+                                    # cancel the order and insert a new one with higher price
+                                    close_price = quote.bid_price1
+                                    api.cancel_order(close_order)
+
+                                if api.is_changing(close_order) and close_order.volume_left != 0 and close_order.status == "FINISHED":
+                                    # if the order is cancelled, insert a new one
+                                    close_order: Order = api.insert_order(
+                                        symbol=symbol, direction="SELL", offset="CLOSE", volume=close_order.volume_left, limit_price=close_price)
+
+                    elif direction == -1:
                         open_order: Order = api.insert_order(
                             symbol=symbol, direction="SELL", offset="OPEN", volume=volume, limit_price = quote.bid_price1, advanced="FAK")
 
-                        while open_order.status != "FINISHED":
+                        while open_order.status == "ALIVE":
                             api.wait_update()
 
                         close_price = open_order.trade_price - tick_price
+                        close_price = min(close_price, quote.ask_price1)
                         close_volume = volume - open_order.volume_left
-                        close_order: Order = api.insert_order(
-                            symbol=symbol, direction="BUY", offset="CLOSE", volume=close_volume, limit_price=close_price)
+                        if close_volume > 0:
+                            close_order: Order = api.insert_order(
+                                symbol=symbol, direction="BUY", offset="CLOSE", volume=close_volume, limit_price=close_price)
+                            close_time = time.time()
+                            while close_order.status == "ALIVE" and close_order.volume_left != 0:
+                                api.wait_update()
 
+                                if api.is_changing(close_order):
+                                    print("close_order: %s, completed: %d" % (close_order.status, close_order.volume_orign - close_order.volume_left))
 
-                if is_wandb:
-                    wandb.log({
-                        "close_price": high_freq_bar.iloc[-1].close,
-                        "static_balance": account.static_balance,
-                        "account_balance": account.balance,
-                        "commission": account.commission,
-                        "position": current_pos,
-                    })
+                                if time.time() - close_time >= close_countdown_seconds:
+                                    # cancel and reinsert order at market price
+                                    if close_order.status == "ALIVE" and close_order.trade_price != quote.ask_price1:
+                                        api.cancel_order(close_order)
+                                        close_order: Order = api.insert_order(
+                                            symbol=symbol, direction="BUY", offset="CLOSE", volume=close_order.volume_left, limit_price=quote.ask_price1)
+                                    continue
+
+                                if close_price > quote.ask_price1:
+                                    # cancel the order and insert a new one with higher price
+                                    close_price = quote.ask_price1
+                                    api.cancel_order(close_order)
+
+                                if api.is_changing(close_order) and close_order.volume_left != 0 and close_order.status == "FINISHED":
+                                    # if the order is cancelled, insert a new one
+                                    close_order: Order = api.insert_order(
+                                        symbol=symbol, direction="BUY", offset="CLOSE", volume=close_order.volume_left, limit_price=close_price)
+                        
+                    if is_wandb:
+                        wandb.log({
+                            "close_price": high_freq_bar.iloc[-1]["close"],
+                            "static_balance": account.static_balance,
+                            "account_balance": account.balance,
+                            "commission": account.commission,
+                            "direction": direction,
+                            "datetime": time_to_s_timestamp(high_freq_bar.iloc[-1]["datetime"])
+                        })
         except BacktestFinished:
             print("Backtest done")
