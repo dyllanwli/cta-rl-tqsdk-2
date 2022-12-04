@@ -63,10 +63,10 @@ class SimpleArbitrage:
         # get prices
         pos_arbitrage = 5
         neg_arbitrage = 5
-        stop_loss_pos_arbitrage = 10  # 正套止损
-        stop_loss_neg_arbitrage = 10  # 反套止损
-        stop_profit_pos_arbitrage = 20  # 正套止盈
-        stop_profit_neg_arbitrage = 20  # 反套止盈
+        stop_loss_pos_arbitrage = 10  # postive arbitrage stop loss
+        stop_loss_neg_arbitrage = 10  # negative arbitrage stop loss
+        stop_profit_pos_arbitrage = 20  # postive arbitrage stop profit
+        stop_profit_neg_arbitrage = 20  # negative arbitrage stop profit 
 
         self.order_list: List[Tuple] = []
         order_lock: bool = False
