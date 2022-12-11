@@ -49,3 +49,14 @@ class FugureTrader:
                 auth=self.auth,
             )
             model.backtest()
+        elif strategy == "simple_hf_order_book":
+            from .strategies.simple_hf_order_book import SimpleHFOrderBook
+            symbol = "DCE.i2301"
+            model = SimpleHFOrderBook(
+                auth=self.auth,
+            )
+            model.backtest(
+                symbol=symbol,
+                start_dt=date(2022, 11, 1),
+                end_dt=date(2022, 11, 30)
+            )

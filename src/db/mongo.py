@@ -14,7 +14,6 @@ from tqsdk.tafunc import time_to_datetime, time_to_str
 from utils.utils import SETTINGS, Interval
 from utils.commodity import Commodity
 
-
 class Mongo:
     def __init__(self) -> None:
         self.db_name: str = SETTINGS['dbs']['db_name']

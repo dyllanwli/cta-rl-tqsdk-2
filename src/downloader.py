@@ -8,10 +8,12 @@ def main():
     # intervals = {'1s', '5s', '1m', '1d'}
     # symbol_list = ['soybean_oil']
     # dao.download_data(tqAPI.auth, symbol_list, date(2020, 9, 3), date(2022, 9, 1), intervals)
-    intervals =  {'1s', '5s', '1m', '1d'}
-    symbol_list = ['methanol']
-    dao.download_data(auth, symbol_list, date(2016, 10, 6), date(2022, 11, 1), intervals)
+    intervals =  {'tick', '1s', '1m', '1d'}
+    symbol_list = ['iron_orb']
+    dao.download_data(auth, symbol_list, date(2016, 1, 1), date(2016, 11, 30), intervals)
     print(symbol_list, intervals, "downloaded")
+
+    
 if __name__ == "__main__":
     main()
 

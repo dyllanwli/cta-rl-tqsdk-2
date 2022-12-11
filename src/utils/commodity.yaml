@@ -22,7 +22,7 @@ commodity:
   bean_2: DCE.b # 豆二
   starch: DCE.cs # 淀粉
   soybean: DCE.m # 豆粕  | 1s - 5s - 1m - 1d - 20160101 - 20220901
-  iron_orb: DCE.i # 铁矿石
+  iron_orb: DCE.i # 铁矿石 | tick - 1s - 1m - 1d - 20160101 - 20221130
   egg: DCE.jd # 鸡蛋
   palm_oil: DCE.pm # 棕榈油 0.22 0
   soybean_oil: DCE.y # 豆油 | 1s - 5s - 1m - 1d - 20160101 - 20220901
