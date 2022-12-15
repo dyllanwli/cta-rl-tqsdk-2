@@ -34,6 +34,8 @@ class SimpleHFOrderBook:
             start_dt=start_dt, end_dt=end_dt), web_gui=False)
         self.account = self.api.get_account()
 
+        quote: Quote = self.api.get_quote(symbol)
+
         ticks: pd.DataFrame = self.api.get_tick_serial(symbol, data_length = 1000)
         
         if self.is_wandb:
@@ -58,6 +60,8 @@ class SimpleHFOrderBook:
             return True
         else:
             return False
+
+    
 
 
 def backtest(
