@@ -12,9 +12,9 @@ class FugureTrader:
         self.symbol = get_symbols_by_names([self.commodity])[0]
         self.is_wandb = True
         self.volume = 5
-        self.commission_fee = 7.7
+        self.commission_fee = 4.5
 
-    def backtest(self, strategy: str = "simple_arbitrage"):
+    def backtest(self, strategy: str = "simple_hf_arron"):
         if strategy == "simple_ema":
             from .strategies.simple_ema import backtest
             backtest(
@@ -49,14 +49,17 @@ class FugureTrader:
                 auth=self.auth,
             )
             model.backtest()
-        elif strategy == "simple_hf_order_book":
-            from .strategies.simple_hf_order_book import SimpleHFOrderBook
-            symbol = "DCE.i2301"
-            model = SimpleHFOrderBook(
+        elif strategy == "simple_hf_arron":
+            from .strategies.simple_hf_aroon import SimpleHFAroon
+            symbol = "CZCE.CF305"
+            model = SimpleHFAroon(
                 auth=self.auth,
+                commission_fee=self.commission_fee,
+                volume=self.volume,
+                is_wandb=self.is_wandb
             )
             model.backtest(
                 symbol=symbol,
-                start_dt=date(2022, 11, 1),
-                end_dt=date(2022, 11, 30)
+                start_dt=date(2022, 11, 10),
+                end_dt=date(2022, 12, 14)
             )
