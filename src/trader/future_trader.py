@@ -16,16 +16,18 @@ class FugureTrader:
 
     def backtest(self, strategy: str = "simple_hf_arron"):
         if strategy == "simple_ema":
-            from .strategies.simple_ema import backtest
-            backtest(
+            from .strategies.simple_ema import SimpleHFEMA
+            symbol = "CZCE.CF305"
+            model = SimpleHFEMA(
                 auth=self.auth,
-                commodity=self.commodity,
-                symbol=self.symbol,
-                is_wandb=self.is_wandb,
                 commission_fee=self.commission_fee,
                 volume=self.volume,
-                start_dt=date(2022, 1, 1),
-                end_dt=date(2022, 8, 1)
+                is_wandb=self.is_wandb
+            )
+            model.backtest(
+                symbol=symbol,
+                start_dt=date(2022, 11, 10),
+                end_dt=date(2022, 12, 14)
             )
         elif strategy == "simple_hf":
             from .strategies.simple_hf import backtest
@@ -55,7 +57,6 @@ class FugureTrader:
             model = SimpleHFAroon(
                 auth=self.auth,
                 commission_fee=self.commission_fee,
-                volume=self.volume,
                 is_wandb=self.is_wandb
             )
             model.backtest(

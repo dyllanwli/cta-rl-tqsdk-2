@@ -4,86 +4,103 @@ from contextlib import closing
 
 import wandb
 from tqsdk import TqApi, TqAuth, TqBacktest, TargetPosTask, BacktestFinished, TqSim
-from tqsdk.objs import Quote
-from tqsdk.ta import EXPMA
-
+from tqsdk.objs import Quote, Account
+from tqsdk.tafunc import ema
 import pytz
 
+import pandas as pd
 
-def close_pos_by_day(dt: int, current_pos: int):
-    """
-    close position at the end of the day
-    """
-    exchange_tz = pytz.timezone('Asia/Shanghai')
-    dt = datetime.utcfromtimestamp(dt / 1e9).astimezone(exchange_tz)
-    if (dt.hour == 14 and dt.minute > 55) or (dt.hour == 22 or dt.minute > 55):
-        return 0
-    return current_pos
+class SimpleHFEMA:
+    def __init__(self, auth: TqAuth, commission_fee: float = 4.5, volume: int = 1, is_wandb: bool = True):
+        self.auth = auth
+        self.tick_price = 0.5
+        self.commission_fee = commission_fee
+        self.is_wandb = is_wandb    
+        self.volume = volume
+        self.ema_periods = [5, 10, 20, 40, 60]
 
+    def backtest(
+        self,
+        symbol: str,
+        start_dt=date(2022, 11, 1),
+        end_dt=date(2022, 11, 30)
+    ):
+        assert self.tick_price > 0, "tick_price must be positive"
+        sim = TqSim(init_balance=200000)
+        self.api = TqApi(account=sim, auth=self.auth, backtest=TqBacktest(
+            start_dt=start_dt, end_dt=end_dt), web_gui=False)
+        sim.set_commission(symbol=symbol, commission=self.commission_fee)
+        self.account: Account = self.api.get_account()
 
-def backtest(
-    auth: TqAuth,
-    commodity: str,
-    symbol: str,
-    is_wandb: bool,
-    commission_fee: float,
-    volume: int,
-    start_dt=date(2022, 1, 1),
-    end_dt=date(2022, 8, 1)
-):
-    sim = TqSim(init_balance=200000)
-    api = TqApi(account=sim, auth=auth, backtest=TqBacktest(
-        start_dt=start_dt, end_dt=end_dt), web_gui=False)
-    if is_wandb:
-        wandb.init(project="backtest-1",
-                   config={"commodity": commodity, "symbol": symbol, "factor": "ema"})
-    with closing(api):
-        try:
-            print("Backtesting")
-            instrument_quote: Quote = api.get_quote(symbol)
-            target_post = TargetPosTask(
-                api, instrument_quote.underlying_symbol)
-            klines = api.get_kline_serial(
-                symbol, duration_seconds=60, data_length=200)
-            account = api.get_account()
-            current_pos = 0
-            threshold_ratio = 0.0
-            while True:
-                api.wait_update()
-                if api.is_changing(instrument_quote, "underlying_symbol"):
-                    print("changing underlying_symbol")
-                    target_post.set_target_volume(0)
-                    target_post = TargetPosTask(
-                        api, instrument_quote.underlying_symbol)
-                    target_post.set_target_volume(current_pos)
-                    sim.set_commission(
-                        symbol=instrument_quote.underlying_symbol, commission=commission_fee)
-                    print("underlying_symbol changed to",
-                          instrument_quote.underlying_symbol)
+        print("Subscribing quote")
+        quote: Quote = self.api.get_quote(symbol)
+        klines_1m = self.api.get_kline_serial(symbol, duration_seconds=60, data_length=300)
+        klines_1s = self.api.get_kline_serial(symbol, duration_seconds=5, data_length=300)
+        self.target_pos_task = TargetPosTask(self.api, symbol, price="ACTIVE")
 
-                if api.is_changing(klines):
-                    expma = EXPMA(klines, 12, 50)
-                    ema_fast = expma['ma1']
-                    ema_slow = expma['ma2']
-                    pre_diff = ema_fast.iloc[-1] - ema_slow.iloc[-1]
-                    post_diff = ema_fast.iloc[-2] - ema_slow.iloc[-2]
-                    if pre_diff < threshold_ratio * klines.iloc[-1].close and post_diff > threshold_ratio * klines.iloc[-1].close:
-                        # print("buy")
-                        current_pos = volume
-                    elif pre_diff > -threshold_ratio * klines.iloc[-1].close and post_diff < -threshold_ratio * klines.iloc[-1].close:
-                        # print("sell")
-                        current_pos = -volume
+        with closing(self.api):
+            try:
+                while True:
+                    self.api.wait_update()
+                    if self.check_trading_time(klines_1m['datetime'].iloc[-1]):
 
-                    current_pos = close_pos_by_day(klines.iloc[-1].datetime)
-                    target_post.set_target_volume(current_pos)
+                        ema_data = self.EXPMA(klines_1m, self.ema_periods)
+                        signal = self.get_signal(klines_1m, ema_data)
+                        if signal == 1:
+                            self.target_pos_task.set_target_volume(self.volume)
+                        elif signal == -1:
+                            self.target_pos_task.set_target_volume(-self.volume)
+                        else:
+                            self.close_position()
+                        self.api.wait_update()
+                    else:
+                        self.close_position()
 
-                    if is_wandb:
+                    if self.is_wandb:
+                        wandb.init(project="backtest-1", config={"symbol": symbol})
+
+                    if self.is_wandb:
                         wandb.log({
-                            "close_price": klines.iloc[-1].close,
-                            "static_balance": account.static_balance,
-                            "account_balance": account.balance,
-                            "commission": account.commission,
-                            "position": current_pos,
+                            "last_price": quote.last_price,
+                            "static_balance": self.account.static_balance,
+                            "account_balance": self.account.balance,
+                            "commission": self.account.commission,
                         })
-        except BacktestFinished:
-            print("Backtest done")
+            except BacktestFinished:
+                print("Backtest done")
+
+    def EXPMA(self, data: pd.DataFrame, ema_periods: list) -> dict:
+        """
+        Calculate exponential moving average
+        """
+        ema_data = {}
+        for period in ema_periods:
+            ema_data[period] = ema(data.close, period)
+        return ema_data
+
+    def check_trading_time(self, dt: int):
+        """
+        close position at the end of the day
+        """
+        exchange_tz = pytz.timezone('Asia/Shanghai')
+        dt = datetime.utcfromtimestamp(dt / 1e9).astimezone(exchange_tz)
+        if (dt.hour == 14 and dt.minute > 55) or (dt.hour == 22 or dt.minute > 55):
+            return False
+        else:
+            return True
+
+    def close_position(self):
+        self.target_pos_task.set_target_volume(0)
+    
+    def get_signal(self, data, ema_data):
+        """
+        1: long
+        -1: short
+        0: close position
+        """
+        ma_0 = ema_data[self.ema_periods[0]]
+        ma_1 = ema_data[self.ema_periods[1]]
+        # if ma_0 crossover ma_1, long
+        if ma_0.iloc[-2] < ma_1.iloc[-2] and ma_0.iloc[-1] > ma_1.iloc[-1]:
+            return 1
+        

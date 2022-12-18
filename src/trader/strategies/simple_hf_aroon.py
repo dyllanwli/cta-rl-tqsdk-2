@@ -22,8 +22,6 @@ class SimpleHFAroon:
         self.is_wandb = is_wandb    
         self.volume = volume
 
-
-
     def backtest(
         self,
         symbol: str,

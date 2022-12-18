@@ -13,6 +13,7 @@ mlp_units_dict = {
 
 INTERVAL = Interval()
 
+# if n_classes == 3, label range: -inf ~ -low | -low ~ low | low ~ inf
 low_by_label_length = {
     INTERVAL.FIVE_SEC: {
         5: 0.0001, # 0.01%

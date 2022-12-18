@@ -8,7 +8,7 @@ class ModelTrainer:
         print("Initializing Model trainer")
         # auth, _ = get_auth(account)
         self.interval = INTERVAL.FIVE_SEC
-        self.commodity = "methanol"
+        self.commodity = "cotton"
         self.symbol = get_symbols_by_names([self.commodity])[0]
         self.max_sample_size = int(max_sample_size)
     
@@ -18,7 +18,7 @@ class ModelTrainer:
                     interval=self.interval, instrument_id=self.symbol, offset=self.max_sample_size, fixed_dt=True)
         return data
 
-    def run(self, is_train=True, model_name = "tcc"):
+    def run(self, is_train=True, model_name = "tcc2"):
         if model_name == "tcc":
             from .models import TTCModel
             model = TTCModel(interval=self.interval, commodity_name=self.commodity, max_encode_length=200, max_label_length=20)
@@ -42,6 +42,16 @@ class ModelTrainer:
                 model.set_training_data(data)
                 del data
                 model.train()
+            else:
+                pass
+        elif model_name == "tcc2":
+            from .models import TTCModel2
+            model = TTCModel2(interval=self.interval, commodity_name=self.commodity, max_encode_length=200, max_label_length=20)
+            if is_train:
+                data = self.get_training_data()
+                model.set_training_data(data)
+                del data
+                # model.train()
             else:
                 pass
             

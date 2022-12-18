@@ -33,7 +33,7 @@ def process_prev_close_spread(df: pd.DataFrame) -> pd.DataFrame:
     del df
     return new_df
 
-def set_volatility_label(df: pd.DataFrame, max_label_length, n_classes, interval):
+def set_training_label(df: pd.DataFrame, max_label_length, n_classes, interval):
     """
         check if the price changes by percentage within max_label_length step
         n_classes = 5
@@ -64,14 +64,15 @@ def set_volatility_label(df: pd.DataFrame, max_label_length, n_classes, interval
                 return np.nan
     elif n_classes == 3:
         def check_volatility(v):
-            if v <= -low:
+            if v < 0:
                 return 0
-            elif -low < v < low:
+            elif v == 0:
+                # hold when price change is 0
                 return 1
-            elif low <= v:
+            elif v > 0:
                 return 2
             else:
-                return np.nan
+                return np.nan 
 
     numerator = df['close'].to_numpy()[max_label_length:]
     denominator = df['close'].to_numpy()[:-max_label_length]
@@ -100,7 +101,7 @@ def process_by_group(g, max_encode_length, max_label_length, n_classes, interval
         Deprecated function
     """  
     print("Setting volatility label")    
-    g = set_volatility_label(g, max_label_length, n_classes, interval)
+    g = set_training_label(g, max_label_length, n_classes, interval)
     target_list = []
     train_list = []
     for i in tqdm(range(g.shape[0] - max_encode_length)):

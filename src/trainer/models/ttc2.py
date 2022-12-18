@@ -19,16 +19,16 @@ import wandb
 from sklearn.model_selection import train_test_split
 from wandb.keras import WandbCallback
 
-from utils.preprocess import process_prev_close_spread, set_volatility_label, process_datatime
+from utils.preprocess import process_prev_close_spread, set_training_label, process_datatime
 from utils.tafunc import ema
 
 
-class TTCModel:
+class TTCModel2:
     # Transformer Time series classification 
     def __init__(self, interval: str, commodity_name: str, max_encode_length: int = 60, max_label_length: int = 5):
         ray.init(include_dashboard=False)
         print('GPU name: ', tf.config.list_physical_devices('GPU'))
-        self.project_name = "ts_prediction_2"
+        self.project_name = "ts_prediction_3"
         self.commodity_name = commodity_name
         self.interval = interval
         self.max_encode_length = max_encode_length
@@ -71,7 +71,7 @@ class TTCModel:
 
         if is_prev_close_spread:
             df = process_prev_close_spread(df)
-        df = set_volatility_label(df, self.max_label_length, self.n_classes, self.interval)
+        df = set_training_label(df, self.max_label_length, self.n_classes, self.interval)
         df = self._add_moving_average(df)
         print(df.shape)
         df = df[self.train_col_name + ["label"]].dropna()

@@ -180,7 +180,6 @@ class TFTModel:
     
     def predict(self, trainer, data):
         """
-
         new_data = self.get_training_data(start_dt=date(2022, 7, 1), end_dt=date(2022, 8, 1))
         model.predict(trainer="/h/diya.li/quant/cta-rl-tqsdk-2/src/lightning_logs/lightning_logs/version_2/checkpoints/epoch=13-step=37058.ckpt", data = new_data)
         """
