@@ -19,6 +19,7 @@ import wandb
 from sklearn.model_selection import train_test_split
 from wandb.keras import WandbCallback
 
+from utils.callbacks import get_lr_metric
 from utils.preprocess import process_prev_close_spread, set_training_label, process_datatime
 from utils.tafunc import ema
 
@@ -92,8 +93,8 @@ class TTCModel2:
     
     def _set_train_dataset(self, data: pd.DataFrame):
         print("Splitting data")
-        train, test = train_test_split(data, test_size=0.3, shuffle=False)
-        train, val = train_test_split(train, test_size=0.3, shuffle=False)
+        train, test = train_test_split(data, test_size=0.25, shuffle=False)
+        train, val = train_test_split(train, test_size=0.25, shuffle=False)
         
         self._set_classes(train.iloc[self.max_encode_length:]['label'].to_numpy(dtype=np.int32))
 
@@ -104,7 +105,7 @@ class TTCModel2:
             sequence_stride=1,
             sampling_rate=1,
             batch_size=self.fit_config["batch_size"],
-            shuffle=False,
+            shuffle=True,
         )
         self.val_dataset = tf.keras.preprocessing.timeseries_dataset_from_array(
             data=val.iloc[:-self.max_encode_length][self.train_col_name].to_numpy(dtype=np.float32),
@@ -113,7 +114,7 @@ class TTCModel2:
             sequence_stride=1,
             sampling_rate=1,
             batch_size=self.fit_config["batch_size"]*2,
-            shuffle=False,
+            shuffle=True,
         )
         self.test_dataset = tf.keras.preprocessing.timeseries_dataset_from_array(
             data=test.iloc[:-self.max_encode_length][self.train_col_name].to_numpy(dtype=np.float32),
@@ -122,7 +123,7 @@ class TTCModel2:
             sequence_stride=1,
             sampling_rate=1,
             batch_size=self.fit_config["batch_size"],
-            shuffle=False,
+            shuffle=True,
         )
         self.input_shape = (self.max_encode_length, len(self.train_col_name))
 
@@ -135,7 +136,7 @@ class TTCModel2:
             print("Loading data from", self.data_output_path)
             data = pd.read_csv(self.data_output_path)
             # save 1000 head data for testing
-            data.head(1000).to_csv(self.data_output_path + "_test", index=False)
+            # data.head(500).to_csv(self.data_output_path + "_test.csv", index=False)
 
         self._set_train_dataset(data._to_pandas())
 
@@ -148,39 +149,41 @@ class TTCModel2:
     
     def build_baseline_model(
         self,
+        nconv = 3,
+        mlp_units = [128, 128],
         filters = 64,
         kernel_size = 3,
+        dropout = 0.2,
+        mlp_dropout = 0.2,
     ):
         input_layer = layers.Input(shape = self.input_shape)
+        x = input_layer
+        for _ in range(nconv):
+            x = layers.Conv1D(filters=filters, kernel_size=kernel_size, padding="same")(x)
+            x = layers.BatchNormalization()(x)
+            x = layers.ReLU()(x)
+            x = layers.Dropout(dropout)(x)
 
-        conv1 = layers.Conv1D(filters=filters, kernel_size=kernel_size, padding="same")(input_layer)
-        conv1 = layers.BatchNormalization()(conv1)
-        conv1 = layers.ReLU()(conv1)
+        x = layers.GlobalAveragePooling1D()(x)
+        for dim in mlp_units:
+            x = layers.Dense(dim, activation="relu")(x)
+            x = layers.Dropout(mlp_dropout)(x)
 
-        conv2 = layers.Conv1D(filters=filters, kernel_size=kernel_size, padding="same")(conv1)
-        conv2 = layers.BatchNormalization()(conv2)
-        conv2 = layers.ReLU()(conv2)
-
-        conv3 = layers.Conv1D(filters=filters, kernel_size=kernel_size, padding="same")(conv2)
-        conv3 = layers.BatchNormalization()(conv3)
-        conv3 = layers.ReLU()(conv3)
-
-        gap = layers.GlobalAveragePooling1D()(conv3)
-
-        output_layer = layers.Dense(self.n_classes, activation="softmax")(gap)
+        output_layer = layers.Dense(self.n_classes, activation="softmax")(x)
 
         model = Model(inputs=input_layer, outputs=output_layer)
 
         lr = keras.optimizers.schedules.ExponentialDecay(
-            initial_learning_rate=1e-4,
+            initial_learning_rate=1e-3,
             decay_steps=10000,
-            decay_rate=0.9,
+            decay_rate=0.96,
         )
-
+        optimizer = keras.optimizers.Adam(learning_rate=lr)
+        lr_metric = get_lr_metric(optimizer)
         model.compile(
             loss="sparse_categorical_crossentropy",
-            optimizer=keras.optimizers.Adam(learning_rate=lr),
-            metrics=["sparse_categorical_accuracy"],
+            optimizer=optimizer,
+            metrics=["sparse_categorical_accuracy", lr_metric],
         )
         model.summary()
         return model
@@ -290,7 +293,7 @@ class TTCModel2:
 
         lr = keras.optimizers.schedules.ExponentialDecay(
             initial_learning_rate=1e-3,
-            decay_steps=10000,
+            decay_steps=50000,
             decay_rate=0.9,
         )
 
@@ -372,7 +375,8 @@ class TTCModel2:
             callbacks=callbacks,
         )
 
-        test_loss, test_acc = model.evaluate(self.test_dataset)
+        print(model.metrics_names)
+        test_loss, test_acc, _ = model.evaluate(self.test_dataset)
         print("Test loss:", test_loss)
         print("Test accuracy:", test_acc)
         return model

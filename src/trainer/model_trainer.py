@@ -48,7 +48,8 @@ class ModelTrainer:
             from .models import TTCModel2
             model = TTCModel2(interval=self.interval, commodity_name=self.commodity, max_encode_length=200, max_label_length=1)
             if is_train:
-                data = self.get_training_data()
+                # data = self.get_training_data()
+                data = []
                 model.set_training_data(data)
                 del data
                 model.train()
