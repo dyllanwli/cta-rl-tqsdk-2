@@ -24,7 +24,7 @@ from utils.tafunc import ema
 
 
 class TTCModel2:
-    # Transformer Time series classification 
+    # Transformer Time series classification Version 2
     def __init__(self, interval: str, commodity_name: str, max_encode_length: int = 60, max_label_length: int = 5):
         ray.init(include_dashboard=False)
         print('GPU name: ', tf.config.list_physical_devices('GPU'))
@@ -132,7 +132,10 @@ class TTCModel2:
             print("Saving data")
             data.to_csv(self.data_output_path, index=False)
         else:
+            print("Loading data from", self.data_output_path)
             data = pd.read_csv(self.data_output_path)
+            # save 1000 head data for testing
+            data.head(1000).to_csv(self.data_output_path + "_test", index=False)
 
         self._set_train_dataset(data._to_pandas())
 
@@ -142,6 +145,45 @@ class TTCModel2:
         X, y = data[self.train_col_name].to_numpy(), data["label"].to_numpy()
         self._set_classes(y)
         return X, y
+    
+    def build_baseline_model(
+        self,
+        filters = 64,
+        kernel_size = 3,
+    ):
+        input_layer = layers.Input(shape = self.input_shape)
+
+        conv1 = layers.Conv1D(filters=filters, kernel_size=kernel_size, padding="same")(input_layer)
+        conv1 = layers.BatchNormalization()(conv1)
+        conv1 = layers.ReLU()(conv1)
+
+        conv2 = layers.Conv1D(filters=filters, kernel_size=kernel_size, padding="same")(conv1)
+        conv2 = layers.BatchNormalization()(conv2)
+        conv2 = layers.ReLU()(conv2)
+
+        conv3 = layers.Conv1D(filters=filters, kernel_size=kernel_size, padding="same")(conv2)
+        conv3 = layers.BatchNormalization()(conv3)
+        conv3 = layers.ReLU()(conv3)
+
+        gap = layers.GlobalAveragePooling1D()(conv3)
+
+        output_layer = layers.Dense(self.n_classes, activation="softmax")(gap)
+
+        model = Model(inputs=input_layer, outputs=output_layer)
+
+        lr = keras.optimizers.schedules.ExponentialDecay(
+            initial_learning_rate=1e-4,
+            decay_steps=10000,
+            decay_rate=0.9,
+        )
+
+        model.compile(
+            loss="sparse_categorical_crossentropy",
+            optimizer=keras.optimizers.Adam(learning_rate=lr),
+            metrics=["sparse_categorical_accuracy"],
+        )
+        model.summary()
+        return model
 
     def build_model(
         self,
@@ -169,6 +211,7 @@ class TTCModel2:
             # mlp_units = hp.Choice("mlp_units", values=[64, 128, 256], default=128)
             lstm_units = hp.Choice("lstm_units", values=[0, 128, 256], default=0)
             feed_forward_type = hp.Choice("feed_forward_type", values=["cnn", "mlp"], default="cnn")
+
         inputs = keras.Input(shape=input_shape)
         x = inputs
         x = layers.BatchNormalization(epsilon=1e-6)(x)
@@ -246,7 +289,7 @@ class TTCModel2:
         )
 
         lr = keras.optimizers.schedules.ExponentialDecay(
-            initial_learning_rate=1e-4,
+            initial_learning_rate=1e-3,
             decay_steps=10000,
             decay_rate=0.9,
         )
@@ -306,13 +349,17 @@ class TTCModel2:
         eval_result = hypermodel.evaluate(self.test_dataset)
         print("[test loss, test accuracy]:", eval_result)
 
-    def train(self):
+    def train(self, is_baseline = True):
         wandb.init(project=self.project_name, group="train", reinit=True, settings=wandb.Settings(start_method="fork"), name = self.datatype_name)
-        model = self.model_builder()
+        if is_baseline:
+            wandb.run.name = wandb.run.name + "_baseline"
+            model = self.build_baseline_model()
+        else:
+            model = self.model_builder()
 
         callbacks = [
             keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True), 
-            WandbCallback(save_model=True, monitor="sparse_categorical_accuracy", mode="max")
+            WandbCallback(save_model=False, monitor="sparse_categorical_accuracy", mode="max")
         ]
 
         model.fit(

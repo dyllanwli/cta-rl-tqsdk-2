@@ -43,36 +43,21 @@ def set_training_label(df: pd.DataFrame, max_label_length, n_classes, interval):
             -inf ~ -0.01 | -0.01 ~ -0.005 | -0.005 ~ 0.005 | 0.005 ~ 0.01 | 0.01 ~ inf
     """
     # df = pd.DataFrame(df)
-    low = low_by_label_length[interval][max_label_length]
-    high = high_by_label_length[interval][max_label_length]
+    # low = low_by_label_length[interval][max_label_length]
+    # high = high_by_label_length[interval][max_label_length]
 
     # reset the index from 0 to df.shape[0]
     df = df.reset_index(drop=True).reset_index()
-    if n_classes == 5:
-        def check_volatility(v):
-            if v <= -high:
-                return 0
-            elif -high < v <= -low:
-                return 1
-            elif -low < v <= low:
-                return 2
-            elif low < v < high:
-                return 3
-            elif high <= v:
-                return 4
-            else:
-                return np.nan
-    elif n_classes == 3:
-        def check_volatility(v):
-            if v < 0:
-                return 0
-            elif v == 0:
-                # hold when price change is 0
-                return 1
-            elif v > 0:
-                return 2
-            else:
-                return np.nan 
+    def check_volatility(v):
+        if v < 0:
+            return 0
+        elif v == 0:
+            # hold when price change is 0
+            return 1
+        elif v > 0:
+            return 2
+        else:
+            return np.nan 
 
     numerator = df['close'].to_numpy()[max_label_length:]
     denominator = df['close'].to_numpy()[:-max_label_length]

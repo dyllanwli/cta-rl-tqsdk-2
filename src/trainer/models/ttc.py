@@ -19,7 +19,7 @@ import wandb
 from sklearn.model_selection import train_test_split
 from wandb.keras import WandbCallback
 
-from utils.preprocess import process_prev_close_spread, set_volatility_label, process_datatime
+from utils.preprocess import process_prev_close_spread, set_training_label, process_datatime
 from utils.tafunc import ema
 
 
