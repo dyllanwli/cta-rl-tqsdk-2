@@ -29,7 +29,7 @@ class TTCModel2:
     def __init__(self, interval: str, commodity_name: str, max_encode_length: int = 60, max_label_length: int = 5):
         ray.init(include_dashboard=False)
         print('GPU name: ', tf.config.list_physical_devices('GPU'))
-        self.project_name = "ts_prediction_3"
+        self.project_name = "ts_prediction_4"
         self.commodity_name = commodity_name
         self.interval = interval
         self.max_encode_length = max_encode_length
@@ -49,6 +49,7 @@ class TTCModel2:
         self.data_output_path = "./tmp/"+ self.datatype_name+".csv"
         # self.X_output_path = "./tmp/"+ "X_" + self.datatype_name+".npy"
         # self.y_output_path = "./tmp/"+ "y_" + self.datatype_name+".npy"
+        self.set_seed(42)
     
     def _set_classes(self, y: np.ndarray):
         """
@@ -153,16 +154,19 @@ class TTCModel2:
         mlp_units = [128, 128],
         filters = 64,
         kernel_size = 3,
-        dropout = 0.2,
-        mlp_dropout = 0.2,
+        dropout = 0.25,
+        mlp_dropout = 0.25,
+        lstm_units = 64,
     ):
         input_layer = layers.Input(shape = self.input_shape)
         x = input_layer
         for _ in range(nconv):
-            x = layers.Conv1D(filters=filters, kernel_size=kernel_size, padding="same")(x)
+            x = layers.Conv1D(filters=filters, kernel_size=kernel_size, padding="same", activation="relu")(x)
             x = layers.BatchNormalization()(x)
             x = layers.ReLU()(x)
             x = layers.Dropout(dropout)(x)
+        
+        x = layers.LSTM(lstm_units, return_sequences=True)(x)
 
         x = layers.GlobalAveragePooling1D()(x)
         for dim in mlp_units:
@@ -176,7 +180,7 @@ class TTCModel2:
         lr = keras.optimizers.schedules.ExponentialDecay(
             initial_learning_rate=1e-3,
             decay_steps=10000,
-            decay_rate=0.96,
+            decay_rate=0.9,
         )
         optimizer = keras.optimizers.Adam(learning_rate=lr)
         lr_metric = get_lr_metric(optimizer)
@@ -217,17 +221,25 @@ class TTCModel2:
 
         inputs = keras.Input(shape=input_shape)
         x = inputs
-        x = layers.BatchNormalization(epsilon=1e-6)(x)
         for _ in range(num_transformer_blocks):
             x = self.transformer_encoder(x, head_size, num_heads, ff_dim, dropout, feed_forward_type)
         
+        x = layers.BatchNormalization(epsilon=1e-6)(x)
         if lstm_units != 0:
             x = layers.LSTM(lstm_units, return_sequences=True)(x)
 
         x = layers.GlobalAveragePooling1D(data_format="channels_first")(x)
         for dim in mlp_units:
+            # MLP layers for task aware 
             x = layers.Dense(dim, activation="relu")(x)
+            x = layers.BatchNormalization(epsilon=1e-6)(x)
             x = layers.Dropout(mlp_dropout)(x)
+        
+        # classification layers
+        x = layers.Dense(self.n_classes, activation="relu")(x)
+        x = layers.BatchNormalization(epsilon=1e-6)(x)
+        x = layers.Dropout(mlp_dropout)(x)
+
         outputs = layers.Dense(self.n_classes, activation="softmax")(x)
         return Model(inputs, outputs)
 
@@ -246,9 +258,9 @@ class TTCModel2:
         # Feed Forward Part
         if feed_forward_type == "cnn":
             x = layers.LayerNormalization(epsilon=1e-6)(res)
-            x = layers.Conv1D(filters=ff_dim, kernel_size=1, activation="relu")(x)
+            x = layers.Conv1D(filters=ff_dim, kernel_size=3, padding="same", activation="relu")(x)
             x = layers.Dropout(dropout)(x)
-            x = layers.Conv1D(filters=inputs.shape[-1], kernel_size=1)(x)
+            x = layers.Conv1D(filters=inputs.shape[-1], kernel_size=3, padding="same")(x)
         elif feed_forward_type == "mlp":
             x = layers.LayerNormalization(epsilon=1e-6)(res)
             x = layers.Dense(ff_dim, activation="relu")(x)
@@ -264,9 +276,9 @@ class TTCModel2:
             input_shape = self.input_shape,
             head_size = 512,
             num_heads = 4,
-            ff_dim = 4,
-            num_transformer_blocks = 4,
-            mlp_units = [128, 64],
+            ff_dim = 64,
+            num_transformer_blocks = 2,
+            mlp_units = [128, 128, 128],
             dropout = 0.3,
             mlp_dropout = 0.3,
             lstm_units = 0,
@@ -293,7 +305,7 @@ class TTCModel2:
 
         lr = keras.optimizers.schedules.ExponentialDecay(
             initial_learning_rate=1e-3,
-            decay_steps=50000,
+            decay_steps=10000,
             decay_rate=0.9,
         )
 
@@ -352,7 +364,7 @@ class TTCModel2:
         eval_result = hypermodel.evaluate(self.test_dataset)
         print("[test loss, test accuracy]:", eval_result)
 
-    def train(self, is_baseline = True):
+    def train(self, is_baseline: bool = False):
         wandb.init(project=self.project_name, group="train", reinit=True, settings=wandb.Settings(start_method="fork"), name = self.datatype_name)
         if is_baseline:
             wandb.run.name = wandb.run.name + "_baseline"
@@ -376,7 +388,10 @@ class TTCModel2:
         )
 
         print(model.metrics_names)
-        test_loss, test_acc, _ = model.evaluate(self.test_dataset)
+        if is_baseline:
+            test_loss, test_acc, _ = model.evaluate(self.test_dataset)
+        else:
+            test_loss, test_acc = model.evaluate(self.test_dataset)
         print("Test loss:", test_loss)
         print("Test accuracy:", test_acc)
         return model
@@ -397,3 +412,10 @@ class TTCModel2:
             # print(predict, close_price, y)
             break
         print(predict)
+    
+    def set_seed(self, seed):
+        """
+        Set seed for reproducibility
+        """
+        np.random.seed(seed)
+        tf.random.set_seed(seed)
