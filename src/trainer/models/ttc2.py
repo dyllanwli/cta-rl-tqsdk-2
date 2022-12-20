@@ -150,7 +150,7 @@ class TTCModel2:
     
     def model_complie(self, model: Model):
         lr = keras.optimizers.schedules.ExponentialDecay(
-            initial_learning_rate=1e-3,
+            initial_learning_rate=1e-4,
             decay_steps=10000,
             decay_rate=0.9,
         )
@@ -249,7 +249,7 @@ class TTCModel2:
 
         # transformer encoder
         for _ in range(num_transformer_blocks):
-            x = self.transformer_encoder(x, head_size, num_heads, ff_dim, dropout, feed_forward_type)
+            x = self._transformer_encoder(x, head_size, num_heads, ff_dim, dropout, feed_forward_type)
         
         x = layers.BatchNormalization(epsilon=1e-6)(x)
 
@@ -268,7 +268,7 @@ class TTCModel2:
         outputs = layers.Dense(self.n_classes, activation="softmax")(x)
         return Model(inputs, outputs)
 
-    def transformer_encoder(self, inputs, head_size, num_heads, ff_dim, dropout=0, feed_forward_type="cnn"):
+    def _transformer_encoder(self, inputs, head_size, num_heads, ff_dim, dropout=0, feed_forward_type="cnn"):
         """
         Create a single transformer encoder block.
         """
@@ -388,10 +388,10 @@ class TTCModel2:
         eval_result = hypermodel.evaluate(self.test_dataset)
         print("[test loss, test accuracy]:", eval_result)
 
-    def train(self, model_name: bool = True):
+    def train(self, model_name: str = "baseline"):
         wandb.init(project=self.project_name, group="train", reinit=True, settings=wandb.Settings(start_method="fork"), name = self.datatype_name)
+        wandb.run.name = wandb.run.name + model_name
         if model_name == "baseline":
-            wandb.run.name = wandb.run.name + "_baseline"
             model = self.build_baseline_model()
         elif model_name == "transformer":
             model = self.model_builder()
