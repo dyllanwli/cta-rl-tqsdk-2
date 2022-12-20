@@ -31,9 +31,9 @@ class ModelTrainer:
                 # model.tune(search_data_ratio=0.5)
             else:
                 predict_data = self.get_training_data(start_dt=date(2022, 1, 1), end_dt=date(2022, 8, 1))
-                X_predict, y = model.set_predict_data(predict_data)
+                X_pred, y_pred = model.set_predict_data(predict_data)
                 best_model_path = "./tmp/model-best.h5"
-                model.predict(best_model_path, X_predict, y)
+                model.predict(best_model_path, X_pred, y_pred)
         elif model_name == "ttfp":
             from .models import TTFPModel
             model = TTFPModel()
@@ -52,8 +52,11 @@ class ModelTrainer:
                 data = []
                 model.set_training_data(data)
                 del data
-                # model.train()
+                model.train()
             else:
-                pass
+                predict_data = self.get_training_data(start_dt=date(2022, 7, 1), end_dt=date(2022, 8, 1))
+                X_pred, y_pred = model.set_predict_data(predict_data)
+                best_model_path = "./tmp/model-best.h5"
+                model.predict(best_model_path, X_pred, y_pred)
             
         print("Done")

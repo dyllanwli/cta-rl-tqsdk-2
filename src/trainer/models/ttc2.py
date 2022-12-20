@@ -177,6 +177,7 @@ class TTCModel2:
     ):
         input_layer = layers.Input(shape = self.input_shape)
         x = input_layer
+        x = layers.LayerNormalization(epsilon=1e-6)(x)
         for _ in range(nconv):
             x = layers.Conv1D(filters=filters, kernel_size=kernel_size, padding="same", activation="relu")(x)
             x = layers.BatchNormalization()(x)
@@ -283,9 +284,9 @@ class TTCModel2:
         # Feed Forward Part
         if feed_forward_type == "cnn":
             x = layers.LayerNormalization(epsilon=1e-6)(res)
-            x = layers.Conv1D(filters=ff_dim, kernel_size=3, padding="same", activation="relu")(x)
+            x = layers.Conv1D(filters=ff_dim, kernel_size=1, padding="same", activation="relu")(x)
             x = layers.Dropout(dropout)(x)
-            x = layers.Conv1D(filters=inputs.shape[-1], kernel_size=3, padding="same")(x)
+            x = layers.Conv1D(filters=inputs.shape[-1], kernel_size=1, padding="same")(x)
         elif feed_forward_type == "mlp":
             x = layers.LayerNormalization(epsilon=1e-6)(res)
             x = layers.Dense(ff_dim, activation="relu")(x)
@@ -377,7 +378,7 @@ class TTCModel2:
         eval_result = hypermodel.evaluate(self.test_dataset)
         print("[test loss, test accuracy]:", eval_result)
 
-    def train(self, model_name: str = "baseline"):
+    def train(self, model_name: str = "transformer"):
         wandb.init(project=self.project_name, group="train", reinit=True, settings=wandb.Settings(start_method="fork"), name = self.datatype_name)
         wandb.run.name = wandb.run.name + model_name
         if model_name == "baseline":
@@ -389,7 +390,7 @@ class TTCModel2:
 
         callbacks = [
             keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True), 
-            WandbCallback(save_model=False, monitor="sparse_categorical_accuracy", mode="max")
+            WandbCallback(save_model=True, monitor="sparse_categorical_accuracy", mode="max")
         ]
 
         model.fit(
@@ -408,17 +409,18 @@ class TTCModel2:
         print("Test accuracy:", test_acc)
         return model
 
-    def predict(self, model, X_predict, y):
+    def predict(self, model, X_pred, y_pred):
         if isinstance(model, str):
+            print("Load model from: ", model)
             model: Model = models.load_model(model)
 
         # X_predict_norm = self.timeseries_normalize(X_predict)
 
-        eval_result = model.evaluate(X_predict, y)
+        eval_result = model.evaluate(X_pred, y_pred)
         print("[predict loss, predict accuracy]:", eval_result)
 
-        print("X_predict shape: ", X_predict.shape)
-        for x in X_predict:
+        print("X_predict shape: ", X_pred.shape)
+        for x in X_pred:
             predict = model(np.array([x]), training=False)
             # close_price = X_predict[i, -1, 3]
             # print(predict, close_price, y)
