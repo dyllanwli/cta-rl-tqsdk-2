@@ -8,7 +8,7 @@ import modin.pandas as pd
 import ray
 import tensorflow as tf
 from tensorflow import keras
-from keras import layers, Model, models
+from keras import layers, Model, models, applications
 import keras_tuner as kt
 import numpy as np
 
@@ -37,7 +37,7 @@ class TTCModel2:
 
         self.n_classes = 3
         self.train_col_name = ["open", "high", "low", "close", "volume", "is_daytime"] # add moving average will change this
-        self.windows = [5, 10, 20, 30, 60]
+        self.windows = [5, 10, 20, 30, 60, 120, 240]
         self.train_col_name += ["ma_{}".format(window) for window in self.windows]
         self.fit_config = {
             "batch_size": 512,
@@ -148,6 +148,23 @@ class TTCModel2:
         self._set_classes(y)
         return X, y
     
+    def model_complie(self, model: Model):
+        lr = keras.optimizers.schedules.ExponentialDecay(
+            initial_learning_rate=1e-3,
+            decay_steps=10000,
+            decay_rate=0.9,
+        )
+
+        optimizer = keras.optimizers.Adam(learning_rate=lr)
+        lr_metric = get_lr_metric(optimizer)
+        model.compile(
+            loss="sparse_categorical_crossentropy",
+            optimizer=optimizer,
+            metrics=["sparse_categorical_accuracy", lr_metric],
+        )
+        model.summary()
+        return model
+    
     def build_baseline_model(
         self,
         nconv = 3,
@@ -177,20 +194,25 @@ class TTCModel2:
 
         model = Model(inputs=input_layer, outputs=output_layer)
 
-        lr = keras.optimizers.schedules.ExponentialDecay(
-            initial_learning_rate=1e-3,
-            decay_steps=10000,
-            decay_rate=0.9,
-        )
-        optimizer = keras.optimizers.Adam(learning_rate=lr)
-        lr_metric = get_lr_metric(optimizer)
-        model.compile(
-            loss="sparse_categorical_crossentropy",
-            optimizer=optimizer,
-            metrics=["sparse_categorical_accuracy", lr_metric],
-        )
-        model.summary()
+        model = self.model_complie(model)
         return model
+
+    def build_efficient_model(self):
+        input_layer = layers.Input(shape = self.input_shape)
+        model = applications.efficientnet_v2.EfficientNetV2S(
+            include_top=True,
+            weights=None,
+            input_tensor = input_layer,
+            input_shape=None,
+            pooling=None,
+            classes=self.n_classes,
+            classifier_activation="softmax",
+            include_preprocessing=True,
+        )
+
+        model = self.model_complie(model)
+        return model
+
 
     def build_model(
         self,
@@ -206,6 +228,9 @@ class TTCModel2:
         feed_forward_type: str = "cnn",
         hp = False,
     ) -> Model:
+        """
+        Build a transformer model 
+        """
         if hp:
             # hyperparameter tuning
             head_size = hp.Choice("head_size", values=[128, 256, 512], default=128)
@@ -221,24 +246,24 @@ class TTCModel2:
 
         inputs = keras.Input(shape=input_shape)
         x = inputs
+
+        # transformer encoder
         for _ in range(num_transformer_blocks):
             x = self.transformer_encoder(x, head_size, num_heads, ff_dim, dropout, feed_forward_type)
         
         x = layers.BatchNormalization(epsilon=1e-6)(x)
+
         if lstm_units != 0:
             x = layers.LSTM(lstm_units, return_sequences=True)(x)
 
         x = layers.GlobalAveragePooling1D(data_format="channels_first")(x)
+
+        # classification layers
         for dim in mlp_units:
             # MLP layers for task aware 
             x = layers.Dense(dim, activation="relu")(x)
             x = layers.BatchNormalization(epsilon=1e-6)(x)
             x = layers.Dropout(mlp_dropout)(x)
-        
-        # classification layers
-        x = layers.Dense(self.n_classes, activation="relu")(x)
-        x = layers.BatchNormalization(epsilon=1e-6)(x)
-        x = layers.Dropout(mlp_dropout)(x)
 
         outputs = layers.Dense(self.n_classes, activation="softmax")(x)
         return Model(inputs, outputs)
@@ -274,13 +299,13 @@ class TTCModel2:
         """
         model_config = dict(
             input_shape = self.input_shape,
-            head_size = 512,
-            num_heads = 4,
+            head_size = 256,
+            num_heads = 2,
             ff_dim = 64,
             num_transformer_blocks = 2,
             mlp_units = [128, 128, 128],
             dropout = 0.3,
-            mlp_dropout = 0.3,
+            mlp_dropout = 0.2,
             lstm_units = 0,
             feed_forward_type = "cnn",
         )
@@ -328,7 +353,6 @@ class TTCModel2:
                      factor=3,
                      directory='keras_tuner',
                      project_name='ttc_tuner_{}_{}_{}_{}_n{}'.format(self.commodity_name, self.interval, self.max_encode_length, self.max_label_length, self.n_classes))
-
         callbacks = [
             keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True, monitor="val_loss"), 
             WandbCallback(save_model=False, monitor="sparse_categorical_accuracy", mode="max"),
@@ -364,13 +388,15 @@ class TTCModel2:
         eval_result = hypermodel.evaluate(self.test_dataset)
         print("[test loss, test accuracy]:", eval_result)
 
-    def train(self, is_baseline: bool = False):
+    def train(self, model_name: bool = True):
         wandb.init(project=self.project_name, group="train", reinit=True, settings=wandb.Settings(start_method="fork"), name = self.datatype_name)
-        if is_baseline:
+        if model_name == "baseline":
             wandb.run.name = wandb.run.name + "_baseline"
             model = self.build_baseline_model()
-        else:
+        elif model_name == "transformer":
             model = self.model_builder()
+        elif model_name == "efficient":
+            model = self.build_efficient_model()
 
         callbacks = [
             keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True), 
@@ -388,7 +414,7 @@ class TTCModel2:
         )
 
         print(model.metrics_names)
-        if is_baseline:
+        if model_name == "baseline":
             test_loss, test_acc, _ = model.evaluate(self.test_dataset)
         else:
             test_loss, test_acc = model.evaluate(self.test_dataset)
