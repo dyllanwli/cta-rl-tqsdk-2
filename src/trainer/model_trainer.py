@@ -52,7 +52,7 @@ class ModelTrainer:
                 data = []
                 model.set_training_data(data)
                 del data
-                model.train()
+                # model.train()
             else:
                 pass
             

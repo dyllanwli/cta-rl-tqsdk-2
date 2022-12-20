@@ -137,7 +137,7 @@ class TTCModel2:
             print("Loading data from", self.data_output_path)
             data = pd.read_csv(self.data_output_path)
             # save 1000 head data for testing
-            # data.head(500).to_csv(self.data_output_path + "_test.csv", index=False)
+            # data.iloc[20000:20500].to_csv(self.data_output_path + "_test.csv", index=False)
 
         self._set_train_dataset(data._to_pandas())
 
@@ -301,7 +301,7 @@ class TTCModel2:
             input_shape = self.input_shape,
             head_size = 256,
             num_heads = 2,
-            ff_dim = 64,
+            ff_dim = 32,
             num_transformer_blocks = 2,
             mlp_units = [128, 128, 128],
             dropout = 0.3,
@@ -328,7 +328,7 @@ class TTCModel2:
             hp = hp,
         )
 
-        model = self.compile_model(model)
+        model = self.model_complie(model)
         return model
     
     def tune(self):
@@ -377,7 +377,7 @@ class TTCModel2:
         eval_result = hypermodel.evaluate(self.test_dataset)
         print("[test loss, test accuracy]:", eval_result)
 
-    def train(self, model_name: str = "transformer"):
+    def train(self, model_name: str = "baseline"):
         wandb.init(project=self.project_name, group="train", reinit=True, settings=wandb.Settings(start_method="fork"), name = self.datatype_name)
         wandb.run.name = wandb.run.name + model_name
         if model_name == "baseline":
