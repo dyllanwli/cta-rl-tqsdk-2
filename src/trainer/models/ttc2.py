@@ -41,7 +41,7 @@ class TTCModel2:
         self.train_col_name += ["ma_{}".format(window) for window in self.windows]
         self.fit_config = {
             "batch_size": 512,
-            "epochs": 100,
+            "epochs": 20,
             "validation_split": 0.3,
             "shuffle": True,
         }
@@ -150,17 +150,17 @@ class TTCModel2:
     
     def model_complie(self, model: Model):
         lr = keras.optimizers.schedules.ExponentialDecay(
-            initial_learning_rate=1e-4,
+            initial_learning_rate=1e-3,
             decay_steps=10000,
             decay_rate=0.9,
         )
 
         optimizer = keras.optimizers.Adam(learning_rate=lr)
-        lr_metric = get_lr_metric(optimizer)
+        # lr_metric = get_lr_metric(optimizer) # add this to metrics if need to monitor lr
         model.compile(
             loss="sparse_categorical_crossentropy",
             optimizer=optimizer,
-            metrics=["sparse_categorical_accuracy", lr_metric],
+            metrics=["sparse_categorical_accuracy"],
         )
         model.summary()
         return model
@@ -293,7 +293,7 @@ class TTCModel2:
             x = layers.Dense(inputs.shape[-1])(x)
         return x + res
     
-    def model_builder(self, hp = False) -> Model:
+    def build_transformer(self, hp = False) -> Model:
         """
         Build the model with hyperparameters
         """
@@ -328,18 +328,7 @@ class TTCModel2:
             hp = hp,
         )
 
-        lr = keras.optimizers.schedules.ExponentialDecay(
-            initial_learning_rate=1e-3,
-            decay_steps=10000,
-            decay_rate=0.9,
-        )
-
-        model.compile(
-            loss="sparse_categorical_crossentropy",
-            optimizer=keras.optimizers.Adam(learning_rate=lr),
-            metrics=["sparse_categorical_accuracy"],
-        )
-        model.summary()
+        model = self.compile_model(model)
         return model
     
     def tune(self):
@@ -347,7 +336,7 @@ class TTCModel2:
         Tune hyperparameters
         """
         wandb.init(project=self.project_name, group="tune", reinit=True, settings=wandb.Settings(start_method="fork"), name=self.datatype_name)
-        tuner = kt.Hyperband(self.model_builder,
+        tuner = kt.Hyperband(self.build_transformer,
                      objective='sparse_categorical_accuracy',
                      max_epochs=10,
                      factor=3,
@@ -388,13 +377,13 @@ class TTCModel2:
         eval_result = hypermodel.evaluate(self.test_dataset)
         print("[test loss, test accuracy]:", eval_result)
 
-    def train(self, model_name: str = "baseline"):
+    def train(self, model_name: str = "transformer"):
         wandb.init(project=self.project_name, group="train", reinit=True, settings=wandb.Settings(start_method="fork"), name = self.datatype_name)
         wandb.run.name = wandb.run.name + model_name
         if model_name == "baseline":
             model = self.build_baseline_model()
         elif model_name == "transformer":
-            model = self.model_builder()
+            model = self.build_transformer()
         elif model_name == "efficient":
             model = self.build_efficient_model()
 
@@ -414,10 +403,7 @@ class TTCModel2:
         )
 
         print(model.metrics_names)
-        if model_name == "baseline":
-            test_loss, test_acc, _ = model.evaluate(self.test_dataset)
-        else:
-            test_loss, test_acc = model.evaluate(self.test_dataset)
+        test_loss, test_acc = model.evaluate(self.test_dataset)
         print("Test loss:", test_loss)
         print("Test accuracy:", test_acc)
         return model
