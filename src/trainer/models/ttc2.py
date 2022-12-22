@@ -29,15 +29,16 @@ class TTCModel2:
     def __init__(self, interval: str, commodity_name: str, max_encode_length: int = 60, max_label_length: int = 5):
         ray.init(include_dashboard=False)
         print('GPU name: ', tf.config.list_physical_devices('GPU'))
-        self.project_name = "ts_prediction_4"
+        self.project_name = "ts_prediction_5"
         self.commodity_name = commodity_name
         self.interval = interval
         self.max_encode_length = max_encode_length
         self.max_label_length = max_label_length
 
         self.n_classes = 3
-        self.train_col_name = ["open", "high", "low", "close", "volume", "open_oi", "close_oi", "is_daytime"] # add moving average will change this
-        self.windows = [5, 10, 20, 30, 60, 120, 240]
+        # self.train_col_name = ["open", "high", "low", "close", "volume", "open_oi", "close_oi", "is_daytime"] # add moving average will change this
+        self.train_col_name = ["close", "volume", "is_daytime"]
+        self.windows = [5, 10, 20, 30, 60, 120]
         self.train_col_name += ["ma_{}".format(window) for window in self.windows]
         self.fit_config = {
             "batch_size": 512,
@@ -96,7 +97,7 @@ class TTCModel2:
     def _set_train_dataset(self, data: pd.DataFrame):
         print("Splitting data")
         train, test = train_test_split(data, test_size=0.25, shuffle=False)
-        train, val = train_test_split(train, test_size=0.25, shuffle=False)
+        train, val = train_test_split(train, test_size=0.2, shuffle=False)
         
         self._set_classes(train.iloc[self.max_encode_length:]['label'].to_numpy(dtype=np.int32))
 
@@ -175,7 +176,7 @@ class TTCModel2:
         kernel_size = 3,
         dropout = 0.25,
         mlp_dropout = 0.25,
-        lstm_units = 64,
+        lstm_units = 0,
     ):
         input_layer = layers.Input(shape = self.input_shape)
         x = input_layer
@@ -186,7 +187,8 @@ class TTCModel2:
             x = layers.ReLU()(x)
             x = layers.Dropout(dropout)(x)
         
-        # x = layers.LSTM(lstm_units, return_sequences=True)(x)
+        if lstm_units > 0:
+            x = layers.LSTM(lstm_units, return_sequences=True)(x)
 
         x = layers.GlobalAveragePooling1D()(x)
         for dim in mlp_units:
@@ -304,13 +306,13 @@ class TTCModel2:
             input_shape = self.input_shape,
             head_size = 256,
             num_heads = 2,
-            ff_dim = 64,
+            ff_dim = 128,
             num_transformer_blocks = 2,
             mlp_units = [128, 128],
             dropout = 0.3,
             mlp_dropout = 0.3,
             lstm_units = 0,
-            feed_forward_type = "cnn",
+            feed_forward_type = "mlp",
         )
         if hp == False:
             print("Model config: ", model_config)
@@ -380,7 +382,7 @@ class TTCModel2:
         eval_result = hypermodel.evaluate(self.test_dataset)
         print("[test loss, test accuracy]:", eval_result)
 
-    def train(self, model_name: str = "baseline"):
+    def train(self, model_name: str = "transformer"):
         wandb.init(project=self.project_name, group="train", reinit=True, settings=wandb.Settings(start_method="fork"), name = self.datatype_name, resume="allow")
         wandb.run.name = wandb.run.name + model_name
         if model_name == "baseline":
@@ -416,6 +418,8 @@ class TTCModel2:
         if isinstance(model, str):
             print("Load model from: ", model)
             model: Model = models.load_model(model)
+        else:
+            model: Model = models.load_model(self.model_path)
         # X_predict_norm = self.timeseries_normalize(X_predict)
         
         predict_dataset = tf.keras.preprocessing.timeseries_dataset_from_array(
@@ -427,12 +431,13 @@ class TTCModel2:
             batch_size=self.fit_config["batch_size"]*2,
             shuffle=True,
         )
-        # eval_result = model.evaluate(predict_dataset)
-        # print("[predict loss, predict accuracy]:", eval_result)
+        eval_result = model.evaluate(predict_dataset)
+        print("[predict loss, predict accuracy]:", eval_result)
+        
         correct_action_count = 0
         hold_action_count = 0
-        for i in tqdm(range(200, X_pred.shape[0])):
-            x = X_pred[i-200:i]
+        for i in tqdm(range(self.max_encode_length, X_pred.shape[0])):
+            x = X_pred[i-self.max_encode_length:i]
             predict = model(np.array([x]), training=False)
             close_price = x[-1, 3]
 
@@ -447,7 +452,7 @@ class TTCModel2:
             else:
                 # print("Hold", predict, y_pred[i])
                 hold_action_count += 1
-        print("Action count: ", X_pred.shape[0] - 200 - hold_action_count)
+        print("Action count: ", X_pred.shape[0] - self.max_encode_length - hold_action_count)
         print("Correct action count: ", correct_action_count)
         print("Hold action count: ", hold_action_count)
     

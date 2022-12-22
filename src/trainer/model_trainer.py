@@ -12,7 +12,7 @@ class ModelTrainer:
         self.symbol = get_symbols_by_names([self.commodity])[0]
         self.max_sample_size = int(max_sample_size)
     
-    def get_training_data(self, start_dt=date(2016, 1, 1), end_dt=date(2022, 7, 1)):
+    def get_training_data(self, start_dt=date(2017, 1, 1), end_dt=date(2022, 7, 1)):
         dataloader = DataLoader(start_dt=start_dt, end_dt=end_dt)
         data = dataloader.get_offline_data(
                     interval=self.interval, instrument_id=self.symbol, offset=self.max_sample_size, fixed_dt=True)
@@ -46,17 +46,18 @@ class ModelTrainer:
                 pass
         elif model_name == "tcc2":
             from .models import TTCModel2
-            model = TTCModel2(interval=self.interval, commodity_name=self.commodity, max_encode_length=300, max_label_length=2)
+            model = TTCModel2(interval=self.interval, commodity_name=self.commodity, max_encode_length=300, max_label_length=7)
             if is_train:
-                data = self.get_training_data()
-                # data = []
+                # data = self.get_training_data()
+                data = []
                 model.set_training_data(data)
                 del data
                 model.train()
             else:
-                predict_data = self.get_training_data(start_dt=date(2022, 7, 1), end_dt=date(2022, 8, 1))
+                predict_data = self.get_training_data(start_dt=date(2022, 7, 16), end_dt=date(2022, 8, 1))
                 X_pred, y_pred = model.set_predict_data(predict_data)
-                best_model_path = "./tmp/model-best.h5"
+                # best_model_path = "./tmp/model-best.h5"
+                best_model_path = []
                 model.predict(best_model_path, X_pred, y_pred)
             
         print("Done")

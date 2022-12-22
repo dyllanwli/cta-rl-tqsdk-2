@@ -21,3 +21,4 @@ pip install transformers
 pip install numba
 
 # pip install beautifulsoup4
+python -m pip install prophet
