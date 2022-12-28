@@ -3,9 +3,8 @@ from contextlib import closing
 
 
 import wandb
-from tqsdk import TqApi, TqAuth, TqBacktest, TargetPosTask, BacktestFinished, TqSim
+from tqsdk import TqApi, TqAuth, TqBacktest, TargetPosTask, BacktestFinished, TqSim, TqAccount
 from tqsdk.objs import Quote, Account
-from tqsdk.tafunc import crossup, crossdown
 from tqsdk.ta import ATR
 import pytz
 
@@ -14,7 +13,7 @@ import numpy as np
 
 
 class NadarayaWatsonCombine:
-    def __init__(self, auth: TqAuth, commission_fee: float = 4.5, volume: int = 1, is_wandb: bool = True):
+    def __init__(self, auth: TqAuth, commission_fee: float = 4.4, volume: int = 1, is_wandb: bool = True):
         self.auth = auth
         self.commission_fee = commission_fee
         self.is_wandb = is_wandb
@@ -24,14 +23,21 @@ class NadarayaWatsonCombine:
     def backtest(
         self,
         symbol: str,
-        start_dt=date(2022, 12, 1),
-        end_dt=date(2022, 12, 25)
+        start_dt = date(2022, 12, 1),
+        end_dt = date(2022, 12, 25),
+        is_live: bool = False, 
     ):
-        sim = TqSim(init_balance=200000)
-        self.api = TqApi(account=sim, auth=self.auth, backtest=TqBacktest(
-            start_dt=start_dt, end_dt=end_dt), web_gui=False)
-        sim.set_commission(symbol=symbol, commission=self.commission_fee)
-        self.account: Account = self.api.get_account()
+        if is_live:
+            acc: Account = TqAccount() # TBD
+            self.api = TqApi(account=acc, auth=self.auth, web_gui=False)
+            self.account: Account = self.api.get_account()
+        else:
+            # use simulation account 
+            sim = TqSim(init_balance=200000)
+            self.api = TqApi(account=sim, auth=self.auth, backtest=TqBacktest(
+                start_dt=start_dt, end_dt=end_dt), web_gui=False)
+            sim.set_commission(symbol=symbol, commission=self.commission_fee)
+            self.account: Account = self.api.get_account()
 
         print("Subscribing quote")
         quote: Quote = self.api.get_quote(symbol)
@@ -64,6 +70,7 @@ class NadarayaWatsonCombine:
 
                     if self.is_wandb:
                         wandb.log({
+                            "signal": signal,
                             "last_price": quote.last_price,
                             "static_balance": self.account.static_balance,
                             "account_balance": self.account.balance,
@@ -92,11 +99,10 @@ class NadarayaWatsonCombine:
         -1: short
         0: close position
         """
-        # TBD
         signal = self.nadaraya_watson(close = klines_1m['close'], h=5, r=1, x0=25, lag=2)
         return signal
 
-    def nadaraya_watson(self, close: pd.Series, h: float = 5, r: float = 1, x0: int = 25, lag: int = 2):
+    def nadaraya_watson(self, close: pd.Series, h: float = 3, r: float = 1, x0: int = 25, lag: int = 1):
         """
         Nadaraya-Watson kernel regression
             close: close price, 
@@ -108,26 +114,24 @@ class NadarayaWatsonCombine:
             lag: lag for crossover detection. Lower values result in earlier crossover, Recommended range: 1-2
         """
 
-        # estimations
+        # Estimations
         yhat1 = self.kernel_regression(close, h, r, x0)
         yhat2 = self.kernel_regression(close, h - lag, r, x0)
 
         # Rates of Change
         was_bearish = yhat1[2] > yhat1[1]
         was_bullish = yhat1[2] < yhat1[1]
-        is_bearish = yhat1[1] > yhat1
-        is_bullish = yhat1[1] < yhat1
+        is_bearish = yhat1[1] > yhat1[0]
+        is_bullish = yhat1[1] < yhat1[0]
         is_bearish_change = is_bearish and was_bullish
         is_bullish_change = is_bullish and was_bearish
 
         # Crossover
-        is_bullish_cross = crossup(yhat2, yhat1)
-        is_bearish_cross = crossdown(yhat2, yhat1)
-        is_bullish_smooth = yhat2 > yhat1
-        is_bearish_smooth = yhat2 < yhat1
-        is_bullish_change = is_bearish and was_bullish
-        is_bearish_change = is_bullish and was_bearish
-
+        is_bullish_cross = self.crossup(yhat2, yhat1)
+        is_bearish_cross = self.crossdown(yhat2, yhat1)
+        # is_bullish_smooth = yhat2 > yhat1
+        # is_bearish_smooth = yhat2 < yhat1
+        
         # Signal
         if is_bullish_cross or is_bullish_change:
             return 1
@@ -136,9 +140,10 @@ class NadarayaWatsonCombine:
         else:
             return 0
         
-    def kernel_regression(self, close: pd.Series, h: float, r: float, x0: int) -> np.ndarray:
+    def kernel_regression(self, close: pd.Series, h: float, r: float, x0: int):
         """
         Nadaraya-Watson kernel regression
+        options: Rational Quadratic Kernel / Gaussian Kernel / Periodic Kernel / Locally Periodic Kernel 
         """
         current_weight = 0
         cumulative_weight = 0
@@ -153,6 +158,13 @@ class NadarayaWatsonCombine:
             estimates[i] = current_weight / cumulative_weight
             i += 1
         return estimates
+
+    def crossup(self, a, b):
+        return a[-1] > b[-1] and a[-2] < b[-2]
+    
+    def crossdown(self, a, b):
+        return a[-1] < b[-1] and a[-2] > b[-2]
+
 
 
 

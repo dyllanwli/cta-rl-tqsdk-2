@@ -6,7 +6,7 @@ from utils.dataloader import get_symbols_by_names
 
 
 class FugureTrader:
-    def __init__(self, account="a4"):
+    def __init__(self, account="a2"):
         self.auth, _ = get_auth(account)
         self.commodity = "iron_orb"
         self.symbol = get_symbols_by_names([self.commodity])[0]
@@ -14,7 +14,7 @@ class FugureTrader:
         self.volume = 5
         self.commission_fee = 4.5
 
-    def backtest(self, strategy: str = "simple_hf_arron"):
+    def backtest(self, strategy: str = "nadaraya_watson_combine"):
         if strategy == "simple_ema":
             from .strategies.simple_ema import SimpleHFEMA
             symbol = "CZCE.CF305"
@@ -77,3 +77,14 @@ class FugureTrader:
                 start_dt=date(2022, 11, 10),
                 end_dt=date(2022, 12, 14)
             )
+        elif strategy == "nadaraya_watson_combine":
+            from .strategies.nadaraya_watson_combine import NadarayaWatsonCombine
+            symbol = "CZCE.CF305"
+            model = NadarayaWatsonCombine(
+                auth=self.auth,
+                is_wandb=self.is_wandb
+            )
+            model.backtest(
+                symbol=symbol,
+            )
+
