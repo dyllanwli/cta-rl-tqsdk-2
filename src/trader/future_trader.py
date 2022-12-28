@@ -64,3 +64,16 @@ class FugureTrader:
                 start_dt=date(2022, 11, 10),
                 end_dt=date(2022, 12, 14)
             )
+        elif strategy == "half_hull":
+            from .strategies.half_hull import HalfHull
+            symbol = "CZCE.CF305"
+            model = HalfHull(
+                auth=self.auth,
+                commission_fee=self.commission_fee,
+                is_wandb=self.is_wandb
+            )
+            model.backtest(
+                symbol=symbol,
+                start_dt=date(2022, 11, 10),
+                end_dt=date(2022, 12, 14)
+            )

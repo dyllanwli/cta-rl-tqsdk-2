@@ -5,7 +5,7 @@ from contextlib import closing
 import wandb
 from tqsdk import TqApi, TqAuth, TqBacktest, TargetPosTask, BacktestFinished, TqSim
 from tqsdk.objs import Quote, Account
-from tqsdk.tafunc import ema
+from tqsdk.tafunc import ema, get_ticks_info
 import pytz
 
 import pandas as pd
@@ -17,7 +17,18 @@ class SimpleHFEMA:
         self.commission_fee = commission_fee
         self.is_wandb = is_wandb    
         self.volume = volume
-        self.ema_periods = [5, 10, 20, 40, 60]
+        self.ema_periods = [5, 10, 20, 60]
+        self.tick_info_dict = {
+            "多换": 1,
+            "多开": 2,
+            "空换": 3,
+            "多平": 4,
+            "空开": 5,
+            "空平": 6,
+            "双开": 7,
+            "双平": 8,
+            "换手": 9,
+        }
 
     def backtest(
         self,
@@ -34,8 +45,10 @@ class SimpleHFEMA:
 
         print("Subscribing quote")
         quote: Quote = self.api.get_quote(symbol)
+        tick = self.api.get_tick_serial(symbol, data_length=1000)
+
         klines_1m = self.api.get_kline_serial(symbol, duration_seconds=60, data_length=300)
-        klines_1s = self.api.get_kline_serial(symbol, duration_seconds=5, data_length=300)
+        klines_5s = self.api.get_kline_serial(symbol, duration_seconds=5, data_length=300)
         self.target_pos_task = TargetPosTask(self.api, symbol, price="ACTIVE")
 
         with closing(self.api):
@@ -44,8 +57,11 @@ class SimpleHFEMA:
                     self.api.wait_update()
                     if self.check_trading_time(klines_1m['datetime'].iloc[-1]):
 
-                        ema_data = self.EXPMA(klines_1m, self.ema_periods)
-                        signal = self.get_signal(klines_1m, ema_data)
+                        tick_info = tick.copy()
+                        tick_info['info'] = get_ticks_info(tick)
+
+                        signal = self.get_signal(klines_1m, klines_5s, tick_info)
+
                         if signal == 1:
                             self.target_pos_task.set_target_volume(self.volume)
                         elif signal == -1:
@@ -92,15 +108,35 @@ class SimpleHFEMA:
     def close_position(self):
         self.target_pos_task.set_target_volume(0)
     
-    def get_signal(self, data, ema_data):
+    def get_signal(self, klines_1m, klines_5s, tick_info):
         """
         1: long
         -1: short
         0: close position
         """
-        ma_0 = ema_data[self.ema_periods[0]]
-        ma_1 = ema_data[self.ema_periods[1]]
-        # if ma_0 crossover ma_1, long
-        if ma_0.iloc[-2] < ma_1.iloc[-2] and ma_0.iloc[-1] > ma_1.iloc[-1]:
-            return 1
-        
+        # get ema data
+        ema_1m = self.EXPMA(klines_1m, self.ema_periods)
+        ema_1s = self.EXPMA(klines_5s, self.ema_periods)
+
+        ema_1m_0 = ema_1m[self.ema_periods[0]]
+        ema_1m_1 = ema_1m[self.ema_periods[1]]
+        ema_1m_2 = ema_1m[self.ema_periods[2]]
+
+        ema_1s_0 = ema_1s[self.ema_periods[0]]
+        ema_1s_1 = ema_1s[self.ema_periods[1]]
+        ema_1s_2 = ema_1s[self.ema_periods[2]]
+
+        # group tick info by "info"
+        tick_info_distribution = self.get_tick_info_distribution(tick_info)
+    
+    def get_tick_info_distribution(self, tick_info):
+        """
+        get tick info distribution
+        """
+        tick_info = tick_info.groupby("info").agg({"price": "mean", "volume": "sum"}).reset_index()
+        tick_info["price"] = tick_info["price"].apply(lambda x: round(x / self.tick_price) * self.tick_price)
+        tick_info = tick_info.groupby("price").agg({"volume": "sum"}).reset_index()
+        tick_info["volume"] = tick_info["volume"] / tick_info["volume"].sum()
+        return tick_info
+
+

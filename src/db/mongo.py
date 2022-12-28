@@ -69,6 +69,24 @@ class Mongo:
             ]
         )
         return collection
+    
+    def load_tick_data(self, instrument_id: str, start: datetime, end: datetime, limit: int = 0) -> pd.DataFrame:
+        collection = self.db['tick_tick']
+        cursor = collection.find(
+            {
+                "instrument_id": instrument_id,
+                "datetime": {
+                    "$gte": start,
+                    "$lte": end,
+                },
+            },
+            {
+                "_id": 0,
+            },
+        ).sort('datetime', 1).limit(limit)
+        df = pd.DataFrame(list(cursor))
+        df['datetime'] = pd.to_datetime(df['datetime'])
+        return df
 
     def load_bar_data(self, instrument_id: str, start: datetime, end: datetime, interval: str, limit: int = 0) -> pd.DataFrame:
         collection = self.db['bar_' + interval]
