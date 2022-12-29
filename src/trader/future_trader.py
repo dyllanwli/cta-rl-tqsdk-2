@@ -6,7 +6,7 @@ from utils.dataloader import get_symbols_by_names
 
 
 class FugureTrader:
-    def __init__(self, account="a2"):
+    def __init__(self, account="a3"):
         self.auth, _ = get_auth(account)
         self.commodity = "iron_orb"
         self.symbol = get_symbols_by_names([self.commodity])[0]

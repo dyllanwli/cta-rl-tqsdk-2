@@ -23,16 +23,16 @@ class NadarayaWatsonCombine:
     def backtest(
         self,
         symbol: str,
-        start_dt = date(2022, 12, 1),
-        end_dt = date(2022, 12, 25),
-        is_live: bool = False, 
+        start_dt=date(2022, 12, 1),
+        end_dt=date(2022, 12, 25),
+        is_live: bool = False,
     ):
         if is_live:
-            acc: Account = TqAccount() # TBD
+            acc: Account = TqAccount()  # TBD
             self.api = TqApi(account=acc, auth=self.auth, web_gui=False)
             self.account: Account = self.api.get_account()
         else:
-            # use simulation account 
+            # use simulation account
             sim = TqSim(init_balance=200000)
             self.api = TqApi(account=sim, auth=self.auth, backtest=TqBacktest(
                 start_dt=start_dt, end_dt=end_dt), web_gui=False)
@@ -43,15 +43,20 @@ class NadarayaWatsonCombine:
         quote: Quote = self.api.get_quote(symbol)
 
         klines_1m = self.api.get_kline_serial(
-            symbol, duration_seconds=60, data_length=200)
+            symbol, duration_seconds=45, data_length=500)
         self.target_pos_task = TargetPosTask(self.api, symbol, price="ACTIVE")
-
+        if self.is_wandb:
+            wandb.init(project="backtest-1", config={"symbol": symbol})
         with closing(self.api):
             try:
                 while True:
                     self.api.wait_update()
-                    if self.check_trading_time(klines_1m['datetime'].iloc[-1]):
+                    if self.api.is_changing(klines_1m.iloc[-1], "datetime"):
+
+                        # calculate signal time
+                        start_time = datetime.now()
                         signal = self.get_signal(klines_1m)
+                        end_time = datetime.now()
 
                         if signal == 1:
                             self.target_pos_task.set_target_volume(self.volume)
@@ -59,17 +64,14 @@ class NadarayaWatsonCombine:
                             self.target_pos_task.set_target_volume(
                                 -self.volume)
                         else:
-                            self.close_position()
+                            # hold or close position
+                            # print("Hold position")
+                            pass
                         self.api.wait_update()
-                    else:
-                        self.close_position()
-
-                    if self.is_wandb:
-                        wandb.init(project="backtest-1",
-                                   config={"symbol": symbol})
 
                     if self.is_wandb:
                         wandb.log({
+                            "singal_time": (end_time - start_time).total_seconds(),
                             "signal": signal,
                             "last_price": quote.last_price,
                             "static_balance": self.account.static_balance,
@@ -85,7 +87,7 @@ class NadarayaWatsonCombine:
         """
         exchange_tz = pytz.timezone('Asia/Shanghai')
         dt = datetime.utcfromtimestamp(dt / 1e9).astimezone(exchange_tz)
-        if (dt.hour == 14 and dt.minute > 55) or (dt.hour == 22 or dt.minute > 55):
+        if (dt.hour == 14 and dt.minute > 58) or (dt.hour == 22 or dt.minute > 58):
             return False
         else:
             return True
@@ -93,13 +95,57 @@ class NadarayaWatsonCombine:
     def close_position(self):
         self.target_pos_task.set_target_volume(0)
 
-    def get_signal(self, klines_1m):
+    def get_signal(self, klines_1m: pd.Series, mode: str = "envelope"):
         """
         1: long
         -1: short
         0: close position
         """
-        signal = self.nadaraya_watson(close = klines_1m['close'], h=5, r=1, x0=25, lag=2)
+        if mode == "base":
+            signal = self.nadaraya_watson(
+                close=klines_1m['close'], h=5, r=1, x0=25, lag=2)
+        elif mode == "envelope":
+            signal = self.nadaraya_watson_envelope(
+                close=klines_1m['close'], h=6, mult=3, length=500)
+        return signal
+
+    def nadaraya_watson_envelope(self, close: pd.Series, h: float = 5, mult: float = 3, length: int = 500):
+        """
+        Nadaraya-Watson Envelope
+            close: close price, 
+            h: bandwidth, controls the degree of smoothness of the envelopes , with higher values returning smoother results.
+            mult: multiplier, controls the envelope width
+            length: determines the number of recent price observations to be used to fit the Nadaraya-Watson Estimator.
+        """
+
+        # calculate the Nadaraya-Watson envelope on the last bar
+        y = np.zeros(length)
+
+        # calculate the kernel function
+        estimation = 0
+        for i in range(length):
+            current_weight = 0
+            cumulative_weight = 0
+            for j in range(length):
+                w = np.exp(-(np.power(i - j, 2) / (h * h * 2)))
+                current_weight += close.iloc[j] * w
+                cumulative_weight += w
+            y2 = current_weight / cumulative_weight
+            estimation += np.abs(y2 - close.iloc[i])
+            y[i] = y2
+
+        # calculate the mean absolute error
+        mae = estimation / length * mult
+
+        upper_band = y + mae  # upper band
+        lower_band = y - mae  # lower band
+
+        if self.crossup(close.values, upper_band):
+            signal = -1
+        elif self.crossdown(close.values, lower_band):
+            signal = 1
+        else:
+            signal = 0
         return signal
 
     def nadaraya_watson(self, close: pd.Series, h: float = 3, r: float = 1, x0: int = 25, lag: int = 1):
@@ -131,7 +177,7 @@ class NadarayaWatsonCombine:
         is_bearish_cross = self.crossdown(yhat2, yhat1)
         # is_bullish_smooth = yhat2 > yhat1
         # is_bearish_smooth = yhat2 < yhat1
-        
+
         # Signal
         if is_bullish_cross or is_bullish_change:
             return 1
@@ -139,7 +185,7 @@ class NadarayaWatsonCombine:
             return -1
         else:
             return 0
-        
+
     def kernel_regression(self, close: pd.Series, h: float, r: float, x0: int):
         """
         Nadaraya-Watson kernel regression
@@ -160,11 +206,13 @@ class NadarayaWatsonCombine:
         return estimates
 
     def crossup(self, a, b):
+        """
+        a cross up b from the bottom
+        """
         return a[-1] > b[-1] and a[-2] < b[-2]
-    
+
     def crossdown(self, a, b):
+        """
+        a cross down b from the top
+        """
         return a[-1] < b[-1] and a[-2] > b[-2]
-
-
-
-
