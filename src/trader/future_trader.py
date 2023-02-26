@@ -14,7 +14,7 @@ class FugureTrader:
         self.volume = 5
         self.commission_fee = 4.5
 
-    def backtest(self, strategy: str = "nadaraya_watson_combine"):
+    def backtest(self, strategy: str = "dynamic_linear_regression_channels"):
         if strategy == "simple_ema":
             from .strategies.simple_ema import SimpleHFEMA
             symbol = "CZCE.CF305"
@@ -81,6 +81,16 @@ class FugureTrader:
             from .strategies.nadaraya_watson_combine import NadarayaWatsonCombine
             symbol = "CZCE.CF305"
             model = NadarayaWatsonCombine(
+                auth=self.auth,
+                is_wandb=self.is_wandb
+            )
+            model.backtest(
+                symbol=symbol,
+            )
+        elif strategy == "dynamic_linear_regression_channels":
+            from .strategies.dynamic_linear_regression_channels import DynamicLinearRegressionChannels
+            symbol = "CZCE.CF305"
+            model = DynamicLinearRegressionChannels(
                 auth=self.auth,
                 is_wandb=self.is_wandb
             )

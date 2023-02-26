@@ -13,7 +13,7 @@ import pandas as pd
 import numpy as np
 
 
-class NadarayaWatsonCombine:
+class DynamicLinearRegressionChannels:
     def __init__(self, auth: TqAuth, commission_fee: float = 4.4, volume: int = 1, is_wandb: bool = True):
         self.auth = auth
         self.commission_fee = commission_fee
